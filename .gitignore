@@ -1,0 +1,24 @@
+# Generated videos and thumbnails
+generator/output/
+generator/thumbnails/
+generator/audio_tmp/
+
+# Secrets and credentials
+generator/.env
+generator/client_secrets.json
+generator/token.json
+
+# Runtime logs
+generator/quizflix_daily.log
+
+# Python cache
+__pycache__/
+*.pyc
+*.pyo
+
+# Environment / secrets
+.env
+
+# Large media uploads (only keep committed samples)
+public/media/*.mp4
+public/media/*.gif

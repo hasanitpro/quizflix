@@ -1,0 +1,3 @@
+# Quizflix Refactored
+
+This is the full PHP + MySQL version of the Quizflix interactive quiz app...

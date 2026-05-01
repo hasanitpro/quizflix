@@ -1,0 +1,2 @@
+quiz_title,intro_text,outro_text,bg_music,chalk_sound,correct_sound,background_image,question,option_1,option_2,option_3,option_4,correct_index,fun_fact
+General Knowledge Quiz,Welcome to the GK challenge!,Thanks for playing!,bg-music.mp3,chalk.mp3,correct.mp3,chalkboard-bg.jpg,What is the capital of France?,Paris,Lyon,Marseille,Nice,0,France is home to the Eiffel Tower.
