@@ -86,6 +86,32 @@ setTimeout(() => {
 </table>
 <?php endif; ?>
 
+<?php
+$activeStatuses = ['pending', 'generating', 'uploading'];
+$activeJobs     = array_filter($videoJobs, fn($j) => in_array($j['status'], $activeStatuses));
+
+// Progress config per status
+$progressCfg = [
+    'pending'    => ['pct' =>  8, 'label' => 'Queued — waiting to start',    'color' => '#9e9e9e', 'pulse' => false],
+    'generating' => ['pct' => 45, 'label' => 'Generating video (~8 min)…',   'color' => '#2196F3', 'pulse' => true],
+    'uploading'  => ['pct' => 82, 'label' => 'Uploading to YouTube…',         'color' => '#ff9800', 'pulse' => true],
+    'done'       => ['pct' => 100,'label' => '✅ Done',                        'color' => '#4CAF50', 'pulse' => false],
+    'failed'     => ['pct' => 100,'label' => '❌ Failed',                      'color' => '#f44336', 'pulse' => false],
+];
+?>
+
+<!-- Active-jobs banner (hidden by default; JS shows it if jobs are running) -->
+<div class="active-jobs-banner" id="active-banner" style="display:none;">
+    <div class="spinner"></div>
+    <div>
+        <strong id="banner-text">Video generation in progress…</strong><br>
+        <span style="color:#666;font-size:0.88rem;">
+            You can safely leave this page — the process runs in the background.
+            This page auto-refreshes every 5 seconds.
+        </span>
+    </div>
+</div>
+
 <h2 style="margin-top:40px;">🎬 Recent YouTube Uploads</h2>
 
 <?php if (count($videoJobs) === 0): ?>
@@ -95,44 +121,131 @@ setTimeout(() => {
     <thead>
         <tr>
             <th>Quiz</th>
-            <th>Status</th>
-            <th>YouTube Link</th>
+            <th>Status &amp; Progress</th>
+            <th>YouTube</th>
             <th>Started</th>
             <th>Completed</th>
         </tr>
     </thead>
     <tbody>
-        <?php foreach ($videoJobs as $job): ?>
-        <tr>
+        <?php foreach ($videoJobs as $job):
+            $cfg     = $progressCfg[$job['status']] ?? $progressCfg['pending'];
+            $isActive = in_array($job['status'], $activeStatuses);
+        ?>
+        <tr data-job-id="<?= (int)$job['id'] ?>" data-status="<?= htmlspecialchars($job['status']) ?>">
             <td><?= htmlspecialchars($job['quiz_title']) ?></td>
-            <td>
-                <?php
-                $statusMap = [
-                    'done'       => '✅ Done',
-                    'failed'     => '❌ Failed',
-                    'generating' => '⏳ Generating',
-                    'uploading'  => '⬆️ Uploading',
-                    'pending'    => '🕐 Pending',
-                ];
-                echo $statusMap[$job['status']] ?? htmlspecialchars($job['status']);
-                if ($job['status'] === 'failed' && $job['error_message']) {
-                    echo '<br><small style="color:#c0392b">' . htmlspecialchars(substr($job['error_message'], 0, 100)) . '</small>';
-                }
-                ?>
+
+            <td class="job-status-cell">
+                <div class="progress-wrap">
+                    <div class="progress-track">
+                        <div class="progress-fill <?= $cfg['pulse'] ? 'pulsing' : '' ?>"
+                             style="width:<?= $cfg['pct'] ?>%;background:<?= $cfg['color'] ?>"></div>
+                    </div>
+                    <div class="progress-label"><?= htmlspecialchars($cfg['label']) ?></div>
+                </div>
+                <?php if ($job['status'] === 'failed' && $job['error_message']): ?>
+                <small style="color:#c0392b;display:block;margin-top:3px;">
+                    <?= htmlspecialchars(substr($job['error_message'], 0, 120)) ?>
+                </small>
+                <?php endif ?>
             </td>
+
             <td>
                 <?php if ($job['youtube_url']): ?>
-                <a href="<?= htmlspecialchars($job['youtube_url']) ?>" target="_blank">▶ Watch</a>
+                <a href="<?= htmlspecialchars($job['youtube_url']) ?>" target="_blank"
+                   class="button" style="padding:4px 10px;">▶ Watch</a>
                 <?php else: ?>
                 —
-                <?php endif; ?>
+                <?php endif ?>
             </td>
-            <td><?= $job['created_at'] ? date("Y-m-d H:i", strtotime($job['created_at'])) : '—' ?></td>
+
+            <td><?= $job['created_at']   ? date("Y-m-d H:i", strtotime($job['created_at']))   : '—' ?></td>
             <td><?= $job['completed_at'] ? date("Y-m-d H:i", strtotime($job['completed_at'])) : '—' ?></td>
         </tr>
-        <?php endforeach; ?>
+        <?php endforeach ?>
     </tbody>
 </table>
-<?php endif; ?>
+<?php endif ?>
+
+<script>
+const ACTIVE   = ['pending', 'generating', 'uploading'];
+const PROGRESS = {
+    pending:    { pct:  8, label: 'Queued — waiting to start',   color: '#9e9e9e', pulse: false },
+    generating: { pct: 45, label: 'Generating video (~8 min)…',  color: '#2196F3', pulse: true  },
+    uploading:  { pct: 82, label: 'Uploading to YouTube…',        color: '#ff9800', pulse: true  },
+    done:       { pct: 100,label: '✅ Done',                       color: '#4CAF50', pulse: false },
+    failed:     { pct: 100,label: '❌ Failed',                     color: '#f44336', pulse: false },
+};
+
+function getActiveIds() {
+    return [...document.querySelectorAll('tr[data-job-id]')]
+        .filter(r => ACTIVE.includes(r.dataset.status))
+        .map(r => r.dataset.jobId);
+}
+
+function renderStatus(cell, status, youtubeUrl, errorMsg) {
+    const cfg = PROGRESS[status] || PROGRESS.pending;
+    let html = `
+        <div class="progress-wrap">
+            <div class="progress-track">
+                <div class="progress-fill ${cfg.pulse ? 'pulsing' : ''}"
+                     style="width:${cfg.pct}%;background:${cfg.color}"></div>
+            </div>
+            <div class="progress-label">${cfg.label}</div>
+        </div>`;
+    if (status === 'failed' && errorMsg)
+        html += `<small style="color:#c0392b;display:block;margin-top:3px;">${errorMsg.substring(0,120)}</small>`;
+    if (status === 'done' && youtubeUrl)
+        html += `<a href="${youtubeUrl}" target="_blank" class="button" style="margin-top:5px;padding:4px 10px;display:inline-block;">▶ Watch</a>`;
+    cell.innerHTML = html;
+}
+
+function updateBanner(activeCount) {
+    const banner = document.getElementById('active-banner');
+    const text   = document.getElementById('banner-text');
+    if (activeCount > 0) {
+        banner.style.display = 'flex';
+        text.textContent = activeCount === 1
+            ? '1 video job in progress…'
+            : `${activeCount} video jobs in progress…`;
+    } else {
+        banner.style.display = 'none';
+    }
+}
+
+async function pollJobs() {
+    const ids = getActiveIds();
+    updateBanner(ids.length);
+    if (!ids.length) { clearInterval(timer); return; }
+
+    try {
+        const res  = await fetch(`job-status.php?ids=${ids.join(',')}`);
+        const jobs = await res.json();
+        for (const job of jobs) {
+            const row  = document.querySelector(`tr[data-job-id="${job.id}"]`);
+            if (!row) continue;
+            row.dataset.status = job.status;
+            renderStatus(
+                row.querySelector('.job-status-cell'),
+                job.status, job.youtube_url, job.error_message
+            );
+            // Reload the Watch link in the YouTube column too
+            const ytCell = row.cells[2];
+            if (job.status === 'done' && job.youtube_url) {
+                ytCell.innerHTML = `<a href="${job.youtube_url}" target="_blank" class="button" style="padding:4px 10px;">▶ Watch</a>`;
+            }
+            // Reload the Completed column
+            if (job.completed_at) {
+                row.cells[4].textContent = job.completed_at.substring(0, 16);
+            }
+        }
+        updateBanner(getActiveIds().length);
+    } catch(e) { console.warn('Job poll failed:', e); }
+}
+
+// Kick off — poll immediately then every 5 s
+pollJobs();
+const timer = setInterval(pollJobs, 5000);
+</script>
 
 <?php include 'templates/footer.php'; ?>

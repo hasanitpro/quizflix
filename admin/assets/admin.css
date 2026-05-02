@@ -163,3 +163,65 @@ label {
 .remove-btn {
     background: #f44336;
 }
+
+/* ── Video job progress bars ─────────────────────────────────────────────── */
+.progress-wrap {
+    min-width: 200px;
+}
+
+.progress-track {
+    height: 10px;
+    background: #e0e0e0;
+    border-radius: 5px;
+    overflow: hidden;
+    margin-bottom: 5px;
+}
+
+.progress-fill {
+    height: 100%;
+    border-radius: 5px;
+    transition: width 0.6s ease;
+}
+
+.progress-fill.pulsing {
+    animation: progressPulse 1.8s ease-in-out infinite;
+}
+
+@keyframes progressPulse {
+    0%, 100% { opacity: 1; }
+    50%       { opacity: 0.55; }
+}
+
+.progress-label {
+    font-size: 0.82rem;
+    color: #555;
+    white-space: nowrap;
+}
+
+/* Active-jobs banner */
+.active-jobs-banner {
+    background: #fff8e1;
+    border: 1px solid #ffc107;
+    border-left: 5px solid #ff9800;
+    border-radius: 6px;
+    padding: 14px 18px;
+    margin-bottom: 24px;
+    display: flex;
+    align-items: center;
+    gap: 14px;
+    font-size: 0.95rem;
+}
+
+.spinner {
+    width: 22px;
+    height: 22px;
+    border: 3px solid #ffc107;
+    border-top-color: #e65100;
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+}
+
+@keyframes spin {
+    to { transform: rotate(360deg); }
+}
