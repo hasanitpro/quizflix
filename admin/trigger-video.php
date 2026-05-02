@@ -23,7 +23,16 @@ if (!$quiz) {
     exit;
 }
 
-// Check if a job is already running for this quiz
+// Block if a video for this quiz already finished successfully
+$done = $pdo->prepare("SELECT id FROM video_jobs WHERE quiz_id = ? AND status = 'done' LIMIT 1");
+$done->execute([$quiz_id]);
+if ($done->fetch()) {
+    $_SESSION['message'] = "A video for \"{$quiz['title']}\" was already uploaded to YouTube. Generate a new quiz instead.";
+    header('Location: index.php');
+    exit;
+}
+
+// Block if a job is already in progress for this quiz
 $check = $pdo->prepare("
     SELECT id FROM video_jobs
     WHERE quiz_id = ? AND status IN ('pending', 'generating', 'uploading')

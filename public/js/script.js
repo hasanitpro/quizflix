@@ -5,7 +5,6 @@ const previewMode = urlParams.get("preview") === "true";
 const quizSelector    = document.getElementById("quiz-selector");
 const quizContainer   = document.getElementById("quiz");
 const music           = document.getElementById("bg-music");
-const chalk           = document.getElementById("chalk-sound");
 const chime           = document.getElementById("correct-chime");
 const startBtn        = document.getElementById("start-btn");
 const fullscreenBtn   = document.getElementById("fullscreen-btn");
@@ -55,8 +54,7 @@ function applyBackground(bgFile) {
 }
 
 function applyAudioFromQuizMeta(meta) {
-    if (meta.bgMusic)     music.src = `public/media/${meta.bgMusic}`;
-    if (meta.chalkSound)  chalk.src = `public/media/${meta.chalkSound}`;
+    if (meta.bgMusic)      music.src = `public/media/${meta.bgMusic}`;
     if (meta.correctSound) chime.src = `public/media/${meta.correctSound}`;
 }
 
@@ -161,7 +159,6 @@ function showQuestion() {
         progressLabel.textContent = `Question ${currentIndex + 1} of ${quizData.length}`;
         progressFill.style.width  = `${(currentIndex / quizData.length) * 100}%`;
 
-        chalk.play();
         const questionEl = document.getElementById("typed-question");
         typeText(q.q, questionEl, () => {
             speak(q.q, () => startTimer(q));

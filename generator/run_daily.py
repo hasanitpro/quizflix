@@ -89,8 +89,19 @@ def run(forced_quiz_id: int | None = None, existing_job_id: int | None = None):
         if forced_quiz_id:
             quiz_id = forced_quiz_id
             log.info(f"Using forced quiz ID: {quiz_id}")
+            # Guard: abort if this quiz already has a completed video upload
+            cur.execute(
+                "SELECT id FROM video_jobs WHERE quiz_id = %s AND status = 'done' LIMIT 1",
+                (quiz_id,),
+            )
+            if cur.fetchone():
+                log.warning(
+                    f"Quiz {quiz_id} already has a completed video upload. "
+                    "Use a different quiz ID or generate a new quiz. Aborting."
+                )
+                return
         else:
-            # Generate a fresh AI quiz for today
+            # Generate a fresh AI quiz for today (topic deduplication handled inside)
             log.info("Generating new AI quiz with Gemini...")
             quiz_id = generate_and_insert_quiz()
             log.info(f"AI quiz created: ID={quiz_id}")

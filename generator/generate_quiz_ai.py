@@ -127,7 +127,6 @@ def _pick_media_assets() -> dict:
 
     return {
         "bg_music":         pick(audio_files, "bg-music.mp3"),
-        "chalk_sound":      pick(audio_files, "chalk.mp3"),
         "correct_sound":    pick(audio_files, "correct.mp3"),
         "background_image": pick(bg_files,    "chalkboard-bg.jpg"),
     }
@@ -148,19 +147,19 @@ def insert_quiz(data: dict, assets: dict) -> int:
 
         cur.execute("""
             INSERT INTO quizzes
-              (title, intro_text, outro_text,
+              (title, topic, intro_text, outro_text,
                youtube_title, youtube_description, youtube_tags,
-               bg_music, chalk_sound, correct_sound, background_image)
+               bg_music, correct_sound, background_image)
             VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
             data["title"],
+            data.get("_topic", ""),
             data["intro_text"],
             data["outro_text"],
             data["youtube_title"],
             data["youtube_description"],
             tags_json,
             assets["bg_music"],
-            assets["chalk_sound"],
             assets["correct_sound"],
             assets["background_image"],
         ))
@@ -194,10 +193,34 @@ def insert_quiz(data: dict, assets: dict) -> int:
 # Public entry point
 # ---------------------------------------------------------------------------
 
+def _pick_topic(forced: str | None) -> str:
+    """Pick a topic not yet used, cycling through all topics before repeating."""
+    if forced:
+        return forced
+    db  = mysql.connector.connect(
+        host=config.DB_HOST, database=config.DB_NAME,
+        user=config.DB_USER, password=config.DB_PASSWORD,
+    )
+    cur = db.cursor()
+    try:
+        cur.execute("SELECT topic FROM quizzes WHERE topic IS NOT NULL AND topic != ''")
+        used = {row[0] for row in cur.fetchall()}
+    finally:
+        cur.close()
+        db.close()
+
+    available = [t for t in config.QUIZ_TOPICS if t not in used]
+    if not available:
+        # All topics exhausted — start fresh cycle
+        print("All topics have been used. Restarting the topic cycle.")
+        available = config.QUIZ_TOPICS
+    return random.choice(available)
+
+
 def generate_and_insert_quiz(topic: str | None = None) -> int:
-    if topic is None:
-        topic = random.choice(config.QUIZ_TOPICS)
+    topic  = _pick_topic(topic)
     data   = generate_quiz_content(topic)
+    data["_topic"] = topic   # pass to insert_quiz via data dict
     assets = _pick_media_assets()
     return insert_quiz(data, assets)
 

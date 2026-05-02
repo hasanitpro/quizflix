@@ -52,7 +52,6 @@ $preview = isset($_GET['preview']) && $_GET['preview'] === 'true';
 
     <!-- Audio -->
     <audio id="bg-music" loop></audio>
-    <audio id="chalk-sound"></audio>
     <audio id="correct-chime"></audio>
 
     <img src="public/assets/logo.png" alt="AZ Quiz Hub Logo" id="quiz-logo">

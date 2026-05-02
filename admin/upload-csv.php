@@ -16,10 +16,10 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['quiz_file'])) {
 
         try {
             while (($row = fgetcsv($handle, 1000, ',')) !== false) {
-                if (count($row) < 14) continue;
+                if (count($row) < 13) continue;
 
                 [
-                    $quizTitle, $introText, $outroText, $bgMusic, $chalkSound,
+                    $quizTitle, $introText, $outroText, $bgMusic,
                     $correctSound, $backgroundImage, $questionText, $opt1,
                     $opt2, $opt3, $opt4, $correctIndex, $funFact
                 ] = $row;
@@ -31,12 +31,12 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_FILES['quiz_file'])) {
                     $quizId = $stmt->fetchColumn();
 
                     if (!$quizId) {
-                        $stmt = $pdo->prepare("INSERT INTO quizzes (title, intro_text, outro_text, bg_music, chalk_sound, correct_sound, background_image) VALUES (?, ?, ?, ?, ?, ?, ?)");
-                        $stmt->execute([$quizTitle, $introText, $outroText, $bgMusic, $chalkSound, $correctSound, $backgroundImage]);
+                        $stmt = $pdo->prepare("INSERT INTO quizzes (title, intro_text, outro_text, bg_music, correct_sound, background_image) VALUES (?, ?, ?, ?, ?, ?)");
+                        $stmt->execute([$quizTitle, $introText, $outroText, $bgMusic, $correctSound, $backgroundImage]);
                         $quizId = $pdo->lastInsertId();
                     } else {
-                        $stmt = $pdo->prepare("UPDATE quizzes SET intro_text = ?, outro_text = ?, bg_music = ?, chalk_sound = ?, correct_sound = ?, background_image = ? WHERE id = ?");
-                        $stmt->execute([$introText, $outroText, $bgMusic, $chalkSound, $correctSound, $backgroundImage, $quizId]);
+                        $stmt = $pdo->prepare("UPDATE quizzes SET intro_text = ?, outro_text = ?, bg_music = ?, correct_sound = ?, background_image = ? WHERE id = ?");
+                        $stmt->execute([$introText, $outroText, $bgMusic, $correctSound, $backgroundImage, $quizId]);
                     }
 
                     $quizCache[$quizTitle] = $quizId;

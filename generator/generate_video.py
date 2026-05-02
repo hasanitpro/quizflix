@@ -339,7 +339,6 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
     outro_text  = quiz.get("outroText", "")
     bg_file     = quiz.get("backgroundImage", "")
     bg_music    = quiz.get("bgMusic", "")
-    chalk_snd   = quiz.get("chalkSound", "")
     correct_snd = quiz.get("correctSound", "")
     questions   = quiz.get("questions", [])
 
@@ -349,7 +348,6 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
 
     bg_path       = media(bg_file)
     bg_music_path = media(bg_music)
-    chalk_path    = media(chalk_snd)
     correct_path  = media(correct_snd)
 
     # 2. Get background image frame (static image; videos handled separately)
@@ -422,7 +420,7 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
         a_frame = build_question_frame(q_text, options, bg_frame)
         a_bg    = get_bg_clip(a_dur)
         a_fg    = make_static_clip(a_frame, a_dur)
-        a_audio = mix_audio(bg_music_path, q_tts_paths[i], chalk_path, a_dur, sfx_start=0.0)
+        a_audio = mix_audio(bg_music_path, q_tts_paths[i], None, a_dur)
         a_comp  = CompositeVideoClip([a_bg, a_fg.set_opacity(0.95)])
         if a_audio:
             a_comp = a_comp.set_audio(a_audio)

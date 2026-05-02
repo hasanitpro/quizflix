@@ -21,14 +21,14 @@ foreach ($questions as &$q) {
 // Handle quiz meta save
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['save_quiz'])) {
     $stmt = $pdo->prepare("
-        UPDATE quizzes SET 
-            title = ?, intro_text = ?, outro_text = ?, 
-            bg_music = ?, chalk_sound = ?, correct_sound = ?, background_image = ?
+        UPDATE quizzes SET
+            title = ?, intro_text = ?, outro_text = ?,
+            bg_music = ?, correct_sound = ?, background_image = ?
         WHERE id = ?
     ");
     $stmt->execute([
         $_POST['title'], $_POST['intro_text'], $_POST['outro_text'],
-        $_POST['bg_music'], $_POST['chalk_sound'], $_POST['correct_sound'], $_POST['background_image'],
+        $_POST['bg_music'], $_POST['correct_sound'], $_POST['background_image'],
         $id
     ]);
     header("Location: edit.php?id=$id&saved=1");
@@ -86,9 +86,8 @@ $imageFiles = listFiles('../public/media', ['jpg', 'jpeg', 'png', 'webp', 'gif',
 
         <?php
     $assets = [
-      'bg_music' => ['label' => 'Background Music', 'files' => $audioFiles],
-      'chalk_sound' => ['label' => 'Chalk Sound', 'files' => $audioFiles],
-      'correct_sound' => ['label' => 'Correct Sound', 'files' => $audioFiles],
+      'bg_music'         => ['label' => 'Background Music',       'files' => $audioFiles],
+      'correct_sound'    => ['label' => 'Correct Answer Sound',   'files' => $audioFiles],
       'background_image' => ['label' => 'Background Image/Video', 'files' => $imageFiles],
     ];
 
