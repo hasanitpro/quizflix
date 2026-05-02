@@ -10,12 +10,11 @@ import argparse
 import asyncio
 import math
 import os
-import textwrap
 from datetime import datetime
 from pathlib import Path
 
 import requests
-from PIL import Image, ImageDraw, ImageFilter, ImageFont
+from PIL import Image, ImageDraw, ImageFont
 
 # moviepy 1.0.3 still references the removed PIL.Image.ANTIALIAS (dropped in Pillow 10)
 if not hasattr(Image, "ANTIALIAS"):
@@ -23,28 +22,49 @@ if not hasattr(Image, "ANTIALIAS"):
 
 from moviepy.editor import (
     AudioFileClip,
-    CompositeVideoClip,
     CompositeAudioClip,
+    CompositeVideoClip,
     ImageClip,
+    ImageSequenceClip,
     VideoFileClip,
     concatenate_videoclips,
 )
-from moviepy.audio.AudioClip import AudioArrayClip
+from moviepy.video.VideoClip import VideoClip
 import numpy as np
 import edge_tts
 
 import config
 
+# ---------------------------------------------------------------------------
+# Layout constants  (all in pixels at 1920×1080)
+# ---------------------------------------------------------------------------
+
+W, H       = config.VIDEO_WIDTH, config.VIDEO_HEIGHT
+PANEL_W    = 920           # content panel width  (≈ browser 860px container)
+PANEL_X    = (W - PANEL_W) // 2
+PANEL_PAD  = 60            # horizontal padding inside panel
+OUTPUT_FPS = 24            # encode at 24 fps (saves ~20 % vs 30)
+TIMER_FPS  = 5             # timer animation rate — arc only needs ~5 fps
+
+# Option gradient colours (matching browser CSS)
+# Each entry: (colour_left, colour_right) as RGB tuples
+OPT_GRADIENTS = [
+    ((231, 76,  60),  (192, 57,  43)),   # A — red
+    ((52,  152, 219), (41,  128, 185)),  # B — blue
+    ((46,  204, 113), (39,  174, 96)),   # C — green
+    ((241, 196, 15),  (243, 156, 18)),   # D — yellow
+]
+CORRECT_GRADIENT = ((0, 200, 100), (0, 150, 70))
+
 
 # ---------------------------------------------------------------------------
-# Helpers
+# Font helpers
 # ---------------------------------------------------------------------------
 
 def load_font(name: str, size: int) -> ImageFont.FreeTypeFont:
     try:
         return ImageFont.truetype(name, size)
     except OSError:
-        # Fallback: Pillow default bitmap font (no sizing)
         return ImageFont.load_default()
 
 
@@ -65,37 +85,241 @@ def wrap_text(text: str, font: ImageFont.FreeTypeFont, max_width: int) -> list[s
     return lines
 
 
-def draw_text_with_shadow(
-    draw: ImageDraw.Draw,
-    xy: tuple,
-    text: str,
-    font: ImageFont.FreeTypeFont,
-    fill: str = config.TEXT_COLOR,
-    shadow: str = config.SHADOW_COLOR,
-    shadow_offset: int = 3,
-):
-    x, y = xy
-    draw.text((x + shadow_offset, y + shadow_offset), text, font=font, fill=shadow)
-    draw.text((x, y), text, font=font, fill=fill)
+# ---------------------------------------------------------------------------
+# Background helpers
+# ---------------------------------------------------------------------------
+
+def dark_overlay(frame: np.ndarray, alpha: float = 0.70) -> np.ndarray:
+    """Darken a frame to approximate browser's #07091a background."""
+    return (frame * (1 - alpha)).astype(np.uint8)
 
 
 def get_background_frame(bg_path: str | None) -> np.ndarray:
-    """Return a single 1920×1080 RGB numpy array for the background."""
-    W, H = config.VIDEO_WIDTH, config.VIDEO_HEIGHT
     if bg_path and os.path.exists(bg_path):
         ext = Path(bg_path).suffix.lower()
-        if ext in (".jpg", ".jpeg", ".png", ".webp", ".gif"):
+        if ext in (".jpg", ".jpeg", ".png", ".webp"):
             img = Image.open(bg_path).convert("RGB").resize((W, H), Image.LANCZOS)
             return np.array(img)
-    # Default dark gradient background
-    img = Image.new("RGB", (W, H), "#0d1b2a")
-    return np.array(img)
+    return np.array(Image.new("RGB", (W, H), "#07091a"))
 
 
-def dark_overlay(frame: np.ndarray, alpha: float = 0.45) -> np.ndarray:
-    """Darken a frame to improve text legibility."""
-    overlay = np.zeros_like(frame)
-    return (frame * (1 - alpha) + overlay * alpha).astype(np.uint8)
+# ---------------------------------------------------------------------------
+# RGBA drawing helpers
+# ---------------------------------------------------------------------------
+
+def _paste_gradient_rect(img_rgba: Image.Image, x1: int, y1: int, x2: int, y2: int,
+                          col1: tuple, col2: tuple, radius: int = 14, alpha: int = 178):
+    """Paste a horizontal-gradient rounded rectangle into an RGBA image."""
+    bw, bh = x2 - x1, y2 - y1
+    if bw <= 0 or bh <= 0:
+        return
+
+    # Gradient array  (shape: bh × bw × 3)
+    t   = np.linspace(0, 1, bw, dtype=np.float32)
+    rgb = np.stack([
+        (col1[c] * (1 - t) + col2[c] * t).astype(np.uint8)
+        for c in range(3)
+    ], axis=1)                            # bw × 3
+    grad_rgb = np.tile(rgb[np.newaxis], (bh, 1, 1))  # bh × bw × 3
+
+    # Rounded-rectangle alpha mask
+    mask_img = Image.new("L", (bw, bh), 0)
+    ImageDraw.Draw(mask_img).rounded_rectangle([0, 0, bw - 1, bh - 1], radius=radius, fill=255)
+    mask = (np.array(mask_img) * alpha // 255).astype(np.uint8)
+
+    grad_rgba = np.dstack([grad_rgb, mask])           # bh × bw × 4
+    patch = Image.fromarray(grad_rgba, "RGBA")
+    img_rgba.alpha_composite(patch, dest=(x1, y1))
+
+
+def _draw_glass_panel(img_rgba: Image.Image, x: int, y: int, w: int, h: int,
+                      radius: int = 22):
+    """Draw a semi-transparent dark 'glass' panel with a subtle border."""
+    overlay = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    d = ImageDraw.Draw(overlay)
+    d.rounded_rectangle([x, y, x + w, y + h], radius=radius,
+                        fill=(10, 10, 35, 210), outline=(255, 255, 255, 28), width=1)
+    img_rgba.alpha_composite(overlay)
+
+
+# ---------------------------------------------------------------------------
+# Frame builders — return RGBA PIL Images (transparent background)
+# ---------------------------------------------------------------------------
+
+def build_question_overlay(
+    question: str,
+    options: list[str],
+    q_idx: int | None    = None,
+    total_q: int | None  = None,
+    reveal_index: int | None = None,
+    fun_fact: str | None = None,
+) -> Image.Image:
+    """
+    Renders the quiz question UI as an RGBA overlay (transparent background).
+    Matches the browser glassmorphism card layout.
+    """
+    img  = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    f_label = load_font(config.FONT_OPTIONS,   30)
+    f_q     = load_font(config.FONT_QUESTION,  56)
+    f_opt   = load_font(config.FONT_OPTIONS,   40)
+    f_badge = load_font(config.FONT_TITLE,     34)
+    f_ff    = load_font(config.FONT_OPTIONS,   34)
+
+    cx      = PANEL_X + PANEL_PAD          # content left edge
+    cw      = PANEL_W - PANEL_PAD * 2      # content width
+    panel_y = 60
+    panel_h = H - 80
+
+    # Glass panel
+    _draw_glass_panel(img, PANEL_X, panel_y, PANEL_W, panel_h)
+    draw = ImageDraw.Draw(img)
+
+    y = panel_y + 36
+
+    # Progress bar + "QUESTION X / Y"
+    if q_idx is not None and total_q:
+        bar_h = 4
+        draw.rounded_rectangle([cx, y, cx + cw, y + bar_h],
+                                radius=2, fill=(255, 255, 255, 25))
+        fill_w = int(cw * q_idx / total_q)
+        if fill_w > 0:
+            draw.rounded_rectangle([cx, y, cx + fill_w, y + bar_h],
+                                    radius=2, fill=(0, 212, 255, 220))
+        y += bar_h + 16
+
+        label = f"QUESTION  {q_idx} / {total_q}"
+        lb    = f_label.getbbox(label)
+        lw    = lb[2] - lb[0]
+        draw.text(((W - lw) // 2, y), label, font=f_label, fill=(0, 212, 255, 180))
+        y += (lb[3] - lb[1]) + 22
+
+    # Question text
+    lines = wrap_text(question, f_q, cw)
+    for line in lines:
+        bb  = f_q.getbbox(line)
+        lw  = bb[2] - bb[0]
+        # Shadow
+        draw.text(((W - lw) // 2 + 3, y + 3), line, font=f_q, fill=(0, 0, 0, 180))
+        draw.text(((W - lw) // 2,     y),     line, font=f_q, fill=(255, 255, 255, 255))
+        y += (bb[3] - bb[1]) + 14
+    y += 26
+
+    # Option cards — 2 × 2 grid
+    gap   = 18
+    box_w = (cw - gap) // 2
+    box_h = 108
+
+    for i, (opt, lbl) in enumerate(zip(options, "ABCD")):
+        col = i % 2
+        row = i // 2
+        ox  = cx  + col * (box_w + gap)
+        oy  = y   + row * (box_h + gap)
+        ox2 = ox  + box_w
+        oy2 = oy  + box_h
+
+        grad = CORRECT_GRADIENT if (reveal_index is not None and i == reveal_index) \
+               else OPT_GRADIENTS[i]
+        _paste_gradient_rect(img, ox, oy, ox2, oy2, grad[0], grad[1], radius=14, alpha=178)
+        draw = ImageDraw.Draw(img)
+
+        # Glow border on correct answer
+        if reveal_index is not None and i == reveal_index:
+            for off in range(1, 5):
+                draw.rounded_rectangle(
+                    [ox - off, oy - off, ox2 + off, oy2 + off],
+                    radius=14 + off, outline=(0, 255, 136, max(0, 110 - off * 28)), width=1,
+                )
+
+        # Card border
+        draw.rounded_rectangle([ox, oy, ox2, oy2], radius=14,
+                                outline=(255, 255, 255, 30), width=1)
+
+        # Letter badge circle
+        badge_r = 19
+        bcx = ox + 22 + badge_r
+        bcy = oy + box_h // 2
+        draw.ellipse([bcx - badge_r, bcy - badge_r, bcx + badge_r, bcy + badge_r],
+                     fill=(255, 255, 255, 50))
+        bb = f_badge.getbbox(lbl)
+        draw.text((bcx - (bb[2] - bb[0]) // 2, bcy - (bb[3] - bb[1]) // 2),
+                  lbl, font=f_badge, fill=(255, 255, 255, 255))
+
+        # Option text
+        text_x = bcx + badge_r + 14
+        text_w = ox2 - text_x - 12
+        opt_lines = wrap_text(opt, f_opt, text_w)
+        oty = oy + (box_h - len(opt_lines) * 50) // 2
+        for ol in opt_lines:
+            draw.text((text_x, oty), ol, font=f_opt, fill=(255, 255, 255, 255))
+            oty += 50
+
+    # Fun-fact strip
+    if fun_fact:
+        ff_lines = wrap_text(f"Fun Fact:  {fun_fact}", f_ff, cw - 20)
+        strip_h  = len(ff_lines) * 46 + 20
+        strip_y  = panel_y + panel_h - strip_h - 16
+        overlay2 = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+        ImageDraw.Draw(overlay2).rounded_rectangle(
+            [PANEL_X + 16, strip_y - 10, PANEL_X + PANEL_W - 16, strip_y + strip_h],
+            radius=12, fill=(255, 229, 102, 28), outline=(255, 229, 102, 60), width=1,
+        )
+        img.alpha_composite(overlay2)
+        draw = ImageDraw.Draw(img)
+        fy = strip_y
+        for fl in ff_lines:
+            bb  = f_ff.getbbox(fl)
+            fx  = (W - (bb[2] - bb[0])) // 2
+            draw.text((fx, fy), fl, font=f_ff, fill=(255, 229, 102, 240))
+            fy += 46
+
+    return img
+
+
+def build_title_overlay(title: str, subtitle: str) -> Image.Image:
+    """RGBA overlay for intro / outro title screen."""
+    img  = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    draw = ImageDraw.Draw(img)
+
+    f_title = load_font(config.FONT_TITLE,   86)
+    f_sub   = load_font(config.FONT_OPTIONS, 44)
+
+    pw = min(PANEL_W + 80, W - 160)
+    px = (W - pw) // 2
+    py = H // 4
+
+    _draw_glass_panel(img, px, py, pw, H // 2, radius=24)
+    draw = ImageDraw.Draw(img)
+
+    y = py + 60
+    for line in wrap_text(title, f_title, pw - 100):
+        bb = f_title.getbbox(line)
+        lw = bb[2] - bb[0]
+        draw.text(((W - lw) // 2 + 3, y + 3), line, font=f_title, fill=(0, 0, 0, 180))
+        draw.text(((W - lw) // 2,     y),     line, font=f_title, fill=(255, 255, 255, 255))
+        y += (bb[3] - bb[1]) + 18
+
+    if subtitle:
+        y += 22
+        for line in wrap_text(subtitle, f_sub, pw - 120):
+            bb = f_sub.getbbox(line)
+            lw = bb[2] - bb[0]
+            draw.text(((W - lw) // 2, y), line, font=f_sub, fill=(200, 220, 255, 210))
+            y += (bb[3] - bb[1]) + 12
+
+    return img
+
+
+# ---------------------------------------------------------------------------
+# Compositing helper
+# ---------------------------------------------------------------------------
+
+def composite_bg_overlay(bg_arr: np.ndarray, overlay_rgba: Image.Image) -> np.ndarray:
+    """Darken bg and alpha-composite the RGBA overlay on top."""
+    bg = Image.fromarray(dark_overlay(bg_arr, 0.70)).convert("RGBA")
+    bg.alpha_composite(overlay_rgba)
+    return np.array(bg.convert("RGB"))
 
 
 # ---------------------------------------------------------------------------
@@ -123,178 +347,77 @@ def tts_duration(path: str) -> float:
 
 
 # ---------------------------------------------------------------------------
-# Frame builders (return Pillow Image)
+# Segment builders
 # ---------------------------------------------------------------------------
 
-def build_title_frame(title: str, subtitle: str, bg_frame: np.ndarray) -> Image.Image:
-    W, H = config.VIDEO_WIDTH, config.VIDEO_HEIGHT
-    img = Image.fromarray(dark_overlay(bg_frame, 0.5))
+def make_static_clip(bg_frames: list, overlay: Image.Image, loop_fps: float,
+                     duration: float) -> ImageSequenceClip:
+    """
+    Pre-composites a static RGBA overlay with the looping bg frames and
+    returns an ImageSequenceClip. Avoids Python-level compositing at write time.
+    """
+    n_unique = len(bg_frames)
+    # Render only the unique loop frames once
+    unique = [composite_bg_overlay(bg_frames[i], overlay) for i in range(n_unique)]
+    n      = max(1, math.ceil(duration * loop_fps))
+    frames = [unique[i % n_unique] for i in range(n)]
+    return ImageSequenceClip(frames, fps=loop_fps)
+
+
+def _draw_timer_on(img_arr: np.ndarray, seconds_left: float, total: float) -> np.ndarray:
+    """Draw timer circle + number on a copy of img_arr; returns new array."""
+    img  = Image.fromarray(img_arr.copy()).convert("RGBA")
     draw = ImageDraw.Draw(img)
 
-    f_title = load_font(config.FONT_TITLE, 90)
-    f_sub   = load_font(config.FONT_OPTIONS, 48)
+    # Timer positioned at top-right of the panel
+    cx = PANEL_X + PANEL_W - 80
+    cy = 60 + 80   # panel_y + offset
+    r  = 62
 
-    # Title
-    lines = wrap_text(title, f_title, W - 200)
-    y = H // 2 - len(lines) * 100 // 2
-    for line in lines:
-        bbox = f_title.getbbox(line)
-        x = (W - (bbox[2] - bbox[0])) // 2
-        draw_text_with_shadow(draw, (x, y), line, f_title)
-        y += 110
+    # Colour by urgency (matches browser: cyan → yellow → red)
+    if seconds_left > 5:
+        arc_color = (0, 212, 255, 230)
+    elif seconds_left > 2:
+        arc_color = (255, 183, 0, 230)
+    else:
+        arc_color = (255, 68, 68, 230)
 
-    # Subtitle
-    if subtitle:
-        sub_lines = wrap_text(subtitle, f_sub, W - 300)
-        y += 30
-        for line in sub_lines:
-            bbox = f_sub.getbbox(line)
-            x = (W - (bbox[2] - bbox[0])) // 2
-            draw_text_with_shadow(draw, (x, y), line, f_sub, fill="#d0e8ff")
-            y += 58
-
-    return img
-
-
-def build_question_frame(
-    question: str,
-    options: list[str],
-    bg_frame: np.ndarray,
-    reveal_index: int | None = None,
-    fun_fact: str | None = None,
-) -> Image.Image:
-    W, H = config.VIDEO_WIDTH, config.VIDEO_HEIGHT
-    img = Image.fromarray(dark_overlay(bg_frame, 0.5))
-    draw = ImageDraw.Draw(img)
-
-    f_q   = load_font(config.FONT_QUESTION, 56)
-    f_opt = load_font(config.FONT_OPTIONS, 44)
-    f_ff  = load_font(config.FONT_OPTIONS, 38)
-
-    # Question text
-    lines = wrap_text(question, f_q, W - 160)
-    y = 80
-    for line in lines:
-        bbox = f_q.getbbox(line)
-        x = (W - (bbox[2] - bbox[0])) // 2
-        draw_text_with_shadow(draw, (x, y), line, f_q)
-        y += 70
-    q_bottom = y + 20
-
-    # Option boxes — 2×2 grid
-    labels = ["A", "B", "C", "D"]
-    pad    = 30
-    cols   = 2
-    box_w  = (W - pad * (cols + 1)) // cols
-    box_h  = 130
-    grid_top = q_bottom + 40
-    row_gap  = 20
-
-    for i, (opt, label) in enumerate(zip(options, labels)):
-        col = i % 2
-        row = i // 2
-        x1  = pad + col * (box_w + pad)
-        y1  = grid_top + row * (box_h + row_gap)
-        x2  = x1 + box_w
-        y2  = y1 + box_h
-
-        color = config.OPTION_COLORS[i]
-        if reveal_index is not None and i == reveal_index:
-            color = config.CORRECT_HIGHLIGHT
-            # Glow: draw wider border
-            for offset in range(1, 6):
-                draw.rounded_rectangle(
-                    [x1 - offset, y1 - offset, x2 + offset, y2 + offset],
-                    radius=16, outline="#00ff88", width=2,
-                )
-
-        draw.rounded_rectangle([x1, y1, x2, y2], radius=14, fill=color)
-
-        # Label letter
-        lbbox = f_opt.getbbox(label)
-        draw.text(
-            (x1 + 20, y1 + (box_h - (lbbox[3] - lbbox[1])) // 2),
-            label, font=f_opt, fill="white",
-        )
-        # Option text
-        opt_lines = wrap_text(opt, f_opt, box_w - 90)
-        oy = y1 + (box_h - len(opt_lines) * 50) // 2
-        for ol in opt_lines:
-            draw.text((x1 + 80, oy), ol, font=f_opt, fill="white")
-            oy += 50
-
-    # Fun fact strip
-    if fun_fact:
-        ff_lines = wrap_text(f"Fun Fact: {fun_fact}", f_ff, W - 160)
-        strip_h  = len(ff_lines) * 50 + 30
-        strip_y  = H - strip_h - 40
-        draw.rectangle([0, strip_y - 10, W, strip_y + strip_h], fill=(0, 0, 0, 180))
-        fy = strip_y
-        for fl in ff_lines:
-            bbox = f_ff.getbbox(fl)
-            fx = (W - (bbox[2] - bbox[0])) // 2
-            draw_text_with_shadow(draw, (fx, fy), fl, f_ff, fill="#ffe066")
-            fy += 50
-
-    return img
-
-
-def build_timer_frame(
-    question: str,
-    options: list[str],
-    bg_frame: np.ndarray,
-    seconds_left: float,
-    total: float = 10.0,
-) -> Image.Image:
-    img = build_question_frame(question, options, bg_frame)
-    draw = ImageDraw.Draw(img)
-
-    W, H = config.VIDEO_WIDTH, config.VIDEO_HEIGHT
-    cx, cy, r = W - 120, 120, 90
     # Background circle
-    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(0, 0, 0, 160))
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], fill=(0, 0, 0, 170))
+    draw.ellipse([cx - r, cy - r, cx + r, cy + r], outline=(255, 255, 255, 22), width=2)
+
     # Arc
     fraction = seconds_left / total
-    end_angle = -90 + 360 * fraction
-    draw.arc([cx - r, cy - r, cx + r, cy + r], start=-90, end=end_angle,
-             fill="#ffffff", width=10)
+    if fraction > 0.001:
+        end_angle = -90 + 360 * fraction
+        draw.arc([cx - r + 8, cy - r + 8, cx + r - 8, cy + r - 8],
+                 start=-90, end=end_angle, fill=arc_color, width=8)
+
     # Number
-    f_timer = load_font(config.FONT_TITLE, 64)
-    num_str = str(math.ceil(seconds_left))
-    bbox = f_timer.getbbox(num_str)
-    draw.text(
-        (cx - (bbox[2] - bbox[0]) // 2, cy - (bbox[3] - bbox[1]) // 2),
-        num_str, font=f_timer, fill="white",
-    )
-    return img
+    f_timer = load_font(config.FONT_TITLE, 54)
+    num     = str(math.ceil(seconds_left))
+    bb      = f_timer.getbbox(num)
+    draw.text((cx - (bb[2] - bb[0]) // 2, cy - (bb[3] - bb[1]) // 2),
+              num, font=f_timer, fill=(255, 255, 255, 255))
 
-
-# ---------------------------------------------------------------------------
-# Segment builders (return moviepy VideoClip)
-# ---------------------------------------------------------------------------
-
-def make_static_clip(frame: np.ndarray | Image.Image, duration: float):
-    if isinstance(frame, Image.Image):
-        frame = np.array(frame)
-    return ImageClip(frame).set_duration(duration)
+    return np.array(img.convert("RGB"))
 
 
 def make_timer_clip(
-    question: str,
-    options: list[str],
-    bg_frame: np.ndarray,
+    base_arr: np.ndarray,       # pre-composited base (bg + question overlay)
     duration: float = 10.0,
-) -> "VideoClip":
-    from moviepy.video.VideoClip import VideoClip
-
-    def make_frame(t):
+) -> ImageSequenceClip:
+    """
+    Pre-renders timer frames at TIMER_FPS by drawing only the arc+number
+    on top of the already-composited base frame.
+    """
+    n_frames = max(1, int(duration * TIMER_FPS)) + 1
+    frames   = []
+    for i in range(n_frames):
+        t         = i / TIMER_FPS
         remaining = max(0.0, duration - t)
-        img = build_timer_frame(question, options, bg_frame, remaining, duration)
-        return np.array(img)
-
-    clip = VideoClip(make_frame, duration=duration)
-    clip.size = (config.VIDEO_WIDTH, config.VIDEO_HEIGHT)
-    return clip.set_fps(config.VIDEO_FPS)
+        frames.append(_draw_timer_on(base_arr, remaining, duration))
+    return ImageSequenceClip(frames, fps=TIMER_FPS)
 
 
 def mix_audio(
@@ -308,10 +431,9 @@ def mix_audio(
 
     if bg_music_path and os.path.exists(bg_music_path):
         music = AudioFileClip(bg_music_path).volumex(config.MUSIC_VOLUME)
-        # Loop music if shorter than needed
         if music.duration < total_duration:
-            loops = math.ceil(total_duration / music.duration)
             from moviepy.audio.AudioClip import concatenate_audioclips
+            loops = math.ceil(total_duration / music.duration)
             music = concatenate_audioclips([music] * loops)
         music = music.subclip(0, total_duration)
         tracks.append(music)
@@ -337,19 +459,20 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
         output_path = os.path.join(config.OUTPUT_DIR, f"quiz_{quiz_id}_{date_str}.mp4")
 
     # 1. Fetch quiz data
-    resp = requests.get(f"{config.QUIZ_API_BASE}/api/get-quiz.php", params={"id": quiz_id}, timeout=10)
+    resp = requests.get(f"{config.QUIZ_API_BASE}/api/get-quiz.php",
+                        params={"id": quiz_id}, timeout=10)
     resp.raise_for_status()
     quiz = resp.json()
 
     title       = quiz.get("title", "Quiz")
-    intro_text  = quiz.get("introText", "")
-    outro_text  = quiz.get("outroText", "")
+    intro_text  = quiz.get("introText",  "")
+    outro_text  = quiz.get("outroText",  "")
     bg_file     = quiz.get("backgroundImage", "")
-    bg_music    = quiz.get("bgMusic", "")
-    correct_snd = quiz.get("correctSound", "")
-    questions   = quiz.get("questions", [])
+    bg_music    = quiz.get("bgMusic",     "")
+    correct_snd = quiz.get("correctSound","")
+    questions   = quiz.get("questions",  [])
+    total_q     = len(questions)
 
-    # Resolve media paths
     def media(name):
         return os.path.join(config.MEDIA_DIR, name) if name else None
 
@@ -357,49 +480,41 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
     bg_music_path = media(bg_music)
     correct_path  = media(correct_snd)
 
-    # 2. Load background — for video files, pre-extract frames into RAM then
-    #    close the reader immediately.  This avoids the Windows [Errno 22] that
-    #    occurs when a VideoFileClip reader and the write_videofile encoder run
-    #    as concurrent ffmpeg subprocesses sharing the same file descriptor.
-    bg_ext = Path(bg_file).suffix.lower() if bg_file else ""
-    use_video_bg = bg_ext in (".mp4",) and bg_path and os.path.exists(bg_path)
+    # 2. Load background — for video files pre-extract all loop frames into RAM
+    #    then close the reader before write_videofile starts to avoid concurrent
+    #    ffmpeg subprocess conflicts on Windows.
+    bg_ext      = Path(bg_file).suffix.lower() if bg_file else ""
+    use_video_bg = bg_ext == ".mp4" and bg_path and os.path.exists(bg_path)
 
     if use_video_bg:
-        _raw       = VideoFileClip(bg_path)
-        _src_fps   = _raw.fps or 25.0
-        # Extract at ≤15 fps, covering ≤2 s of the clip → ≤30 frames (~185 MB)
-        _loop_fps  = min(_src_fps, 15.0)
-        _loop_dur  = min(_raw.duration, 2.0)
-        _interval  = 1.0 / _loop_fps
-        W, H       = config.VIDEO_WIDTH, config.VIDEO_HEIGHT
-        _bg_frames = []
+        _raw      = VideoFileClip(bg_path)
+        _src_fps  = _raw.fps or 25.0
+        _loop_fps = min(_src_fps, 15.0)
+        _loop_dur = min(_raw.duration, 2.0)
+        _interval = 1.0 / _loop_fps
+
+        bg_frames = []
         t = 0.0
         while t < _loop_dur:
-            frame = _raw.get_frame(t)
+            frame   = _raw.get_frame(t)
             resized = Image.fromarray(frame).resize((W, H), Image.LANCZOS)
-            _bg_frames.append(np.array(resized))
+            bg_frames.append(np.array(resized))
             t += _interval
         _raw.close()
-        bg_frame     = _bg_frames[0]
-        _n_bg_frames = len(_bg_frames)
-        print(f"Video background: extracted {_n_bg_frames} frames at {_loop_fps:.0f} fps")
+        print(f"Video background: {len(bg_frames)} frames @ {_loop_fps:.0f} fps")
     else:
-        bg_frame = get_background_frame(bg_path)
+        single = get_background_frame(bg_path)
+        bg_frames = [single]
+        _loop_fps = 1.0
 
-    def get_bg_clip(duration):
-        if use_video_bg:
-            from moviepy.editor import ImageSequenceClip
-            n = max(1, math.ceil(duration * _loop_fps))
-            seq = [_bg_frames[i % _n_bg_frames] for i in range(n)]
-            return ImageSequenceClip(seq, fps=_loop_fps)
-        return ImageClip(bg_frame).set_duration(duration)
+    # Static bg_frame (first frame) used for thumbnail
+    bg_frame = bg_frames[0]
 
     # 3. Generate TTS files
-    print("Generating TTS audio...")
-    tts_prefix = os.path.join(config.AUDIO_TMP_DIR, f"q{quiz_id}_{date_str}")
-
-    intro_tts  = f"{tts_prefix}_intro.mp3"
-    outro_tts  = f"{tts_prefix}_outro.mp3"
+    print("Generating TTS audio…")
+    tts_prefix  = os.path.join(config.AUDIO_TMP_DIR, f"q{quiz_id}_{date_str}")
+    intro_tts   = f"{tts_prefix}_intro.mp3"
+    outro_tts   = f"{tts_prefix}_outro.mp3"
     q_tts_paths = []
     f_tts_paths = []
 
@@ -415,83 +530,76 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
         f_tts_paths.append(fp)
 
     # 4. Build video segments
-    print("Building video segments...")
+    print("Building video segments…")
     segments = []
 
     # --- Intro ---
-    intro_dur = max(tts_duration(intro_tts) + 0.5, 5.0)
-    intro_frame = build_title_frame(title, intro_text, bg_frame)
-    intro_bg    = get_bg_clip(intro_dur)
-    intro_text_clip = make_static_clip(intro_frame, intro_dur)
-    intro_audio = mix_audio(bg_music_path, intro_tts, None, intro_dur)
-    intro_comp  = CompositeVideoClip([intro_bg, intro_text_clip.set_opacity(0.95)])
+    intro_dur     = max(tts_duration(intro_tts) + 0.5, 5.0)
+    intro_overlay = build_title_overlay(title, intro_text)
+    intro_clip    = make_static_clip(bg_frames, intro_overlay, _loop_fps, intro_dur)
+    intro_audio   = mix_audio(bg_music_path, intro_tts, None, intro_dur)
     if intro_audio:
-        intro_comp = intro_comp.set_audio(intro_audio)
-    segments.append(intro_comp)
+        intro_clip = intro_clip.set_audio(intro_audio)
+    segments.append(intro_clip)
 
     # --- Questions ---
     for i, q in enumerate(questions):
-        print(f"  Building question {i + 1}/{len(questions)}...")
+        print(f"  Building question {i + 1}/{total_q}…")
         q_text   = q["q"]
         options  = q["o"]
         correct  = int(q["c"])
         fun_fact = q.get("f", "")
+        q_num    = i + 1
 
-        # Phase A: show question (TTS narration)
-        a_dur = tts_duration(q_tts_paths[i]) + 0.5
-        a_frame = build_question_frame(q_text, options, bg_frame)
-        a_bg    = get_bg_clip(a_dur)
-        a_fg    = make_static_clip(a_frame, a_dur)
-        a_audio = mix_audio(bg_music_path, q_tts_paths[i], None, a_dur)
-        a_comp  = CompositeVideoClip([a_bg, a_fg.set_opacity(0.95)])
+        # Phase A: question read-aloud (TTS narration)
+        a_overlay = build_question_overlay(q_text, options, q_num, total_q)
+        a_dur     = tts_duration(q_tts_paths[i]) + 0.5
+        a_clip    = make_static_clip(bg_frames, a_overlay, _loop_fps, a_dur)
+        a_audio   = mix_audio(bg_music_path, q_tts_paths[i], None, a_dur)
         if a_audio:
-            a_comp = a_comp.set_audio(a_audio)
-        segments.append(a_comp)
+            a_clip = a_clip.set_audio(a_audio)
+        segments.append(a_clip)
 
-        # Phase B: timer countdown (10s)
-        b_dur  = float(config.TIMER_DURATION)
-        b_bg   = get_bg_clip(b_dur)
-        b_timer = make_timer_clip(q_text, options, bg_frame, b_dur)
-        b_audio = mix_audio(bg_music_path, None, None, b_dur)
-        b_comp  = CompositeVideoClip([b_bg, b_timer.set_opacity(0.95)])
+        # Phase B: timer countdown
+        # Build base frame (bg composited with question overlay) once, then
+        # add only the animated arc per TIMER_FPS frame — ~20× fewer PIL draws.
+        b_dur       = float(config.TIMER_DURATION)
+        b_base_arr  = composite_bg_overlay(bg_frames[0], a_overlay)
+        b_timer     = make_timer_clip(b_base_arr, b_dur)
+        b_audio     = mix_audio(bg_music_path, None, None, b_dur)
         if b_audio:
-            b_comp = b_comp.set_audio(b_audio)
-        segments.append(b_comp)
+            b_timer = b_timer.set_audio(b_audio)
+        segments.append(b_timer)
 
         # Phase C: answer reveal + fun fact
-        c_dur  = tts_duration(f_tts_paths[i]) + 1.5
-        c_frame = build_question_frame(q_text, options, bg_frame, reveal_index=correct, fun_fact=fun_fact)
-        c_bg    = get_bg_clip(c_dur)
-        c_fg    = make_static_clip(c_frame, c_dur)
-        c_audio = mix_audio(bg_music_path, f_tts_paths[i], correct_path, c_dur, sfx_start=0.0)
-        c_comp  = CompositeVideoClip([c_bg, c_fg.set_opacity(0.95)])
+        c_overlay = build_question_overlay(q_text, options, q_num, total_q,
+                                           reveal_index=correct, fun_fact=fun_fact)
+        c_dur     = tts_duration(f_tts_paths[i]) + 1.5
+        c_clip    = make_static_clip(bg_frames, c_overlay, _loop_fps, c_dur)
+        c_audio   = mix_audio(bg_music_path, f_tts_paths[i], correct_path, c_dur)
         if c_audio:
-            c_comp = c_comp.set_audio(c_audio)
-        segments.append(c_comp)
+            c_clip = c_clip.set_audio(c_audio)
+        segments.append(c_clip)
 
     # --- Outro ---
-    outro_dur  = max(tts_duration(outro_tts) + 0.5, 5.0)
-    outro_frame = build_title_frame(title, outro_text, bg_frame)
-    outro_bg    = get_bg_clip(outro_dur)
-    outro_fg    = make_static_clip(outro_frame, outro_dur)
-    outro_audio = mix_audio(bg_music_path, outro_tts, None, outro_dur)
-    outro_comp  = CompositeVideoClip([outro_bg, outro_fg.set_opacity(0.95)])
+    outro_dur     = max(tts_duration(outro_tts) + 0.5, 5.0)
+    outro_overlay = build_title_overlay(title, outro_text)
+    outro_clip    = make_static_clip(bg_frames, outro_overlay, _loop_fps, outro_dur)
+    outro_audio   = mix_audio(bg_music_path, outro_tts, None, outro_dur)
     if outro_audio:
-        outro_comp = outro_comp.set_audio(outro_audio)
-    segments.append(outro_comp)
+        outro_clip = outro_clip.set_audio(outro_audio)
+    segments.append(outro_clip)
 
     # 5. Concatenate & export
-    print("Concatenating and exporting video (this may take a while)...")
-    final = concatenate_videoclips(segments, method="compose")
-    # temp_audiofile given an explicit path so moviepy never uses a
-    # NamedTemporaryFile (which Windows locks and ffmpeg can't open).
+    print("Concatenating and exporting video…")
+    final      = concatenate_videoclips(segments, method="compose")
     temp_audio = os.path.join(config.OUTPUT_DIR, f"quiz_{quiz_id}_{date_str}_snd.m4a")
     final.write_videofile(
         output_path,
-        fps=config.VIDEO_FPS,
+        fps=OUTPUT_FPS,
         codec="libx264",
         audio_codec="aac",
-        bitrate="5000k",
+        bitrate="4000k",
         audio_bitrate="192k",
         temp_audiofile=temp_audio,
         remove_temp=True,
@@ -502,26 +610,23 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
     thumb_path = os.path.join(config.THUMB_DIR, f"quiz_{quiz_id}_{date_str}.jpg")
     _make_thumbnail(title, bg_frame, thumb_path)
 
-    print(f"Video saved: {output_path}")
-    print(f"Thumbnail:   {thumb_path}")
+    print(f"Video saved:  {output_path}")
+    print(f"Thumbnail:    {thumb_path}")
 
     final.close()
-
     return output_path
 
 
 def _make_thumbnail(title: str, bg_frame: np.ndarray, out_path: str):
-    W, H = config.VIDEO_WIDTH, config.VIDEO_HEIGHT
-    img  = Image.fromarray(dark_overlay(bg_frame, 0.4))
+    img  = Image.fromarray(dark_overlay(bg_frame, 0.55))
     draw = ImageDraw.Draw(img)
     font = load_font(config.FONT_TITLE, 110)
 
     lines = wrap_text(title, font, W - 200)
     y = (H - len(lines) * 130) // 2
     for line in lines:
-        bbox = font.getbbox(line)
-        x = (W - (bbox[2] - bbox[0])) // 2
-        # Thick shadow
+        bb = font.getbbox(line)
+        x  = (W - (bb[2] - bb[0])) // 2
         for dx in range(-4, 5):
             for dy in range(-4, 5):
                 draw.text((x + dx, y + dy), line, font=font, fill="#000000")
@@ -537,7 +642,7 @@ def _make_thumbnail(title: str, bg_frame: np.ndarray, out_path: str):
 
 if __name__ == "__main__":
     parser = argparse.ArgumentParser(description="Generate a quiz video from AZ Quiz Hub")
-    parser.add_argument("--quiz-id", type=int, required=True, help="Quiz ID from the database")
-    parser.add_argument("--output", type=str, default=None, help="Output MP4 file path")
+    parser.add_argument("--quiz-id", type=int, required=True)
+    parser.add_argument("--output",  type=str, default=None)
     args = parser.parse_args()
     generate_video(args.quiz_id, args.output)
