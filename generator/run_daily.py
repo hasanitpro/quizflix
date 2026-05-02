@@ -1,5 +1,5 @@
 """
-run_daily.py  —  QuizFlix daily orchestrator
+run_daily.py  —  AZ Quiz Hub daily orchestrator
 
 Selects the next quiz (oldest last_uploaded_at), generates the video,
 uploads to YouTube, and logs the result to the video_jobs table.
@@ -87,7 +87,7 @@ def update_job(cursor, job_id: int, **fields):
 # ---------------------------------------------------------------------------
 
 def run(forced_quiz_id: int | None = None, existing_job_id: int | None = None):
-    log.info("=== QuizFlix daily run started ===")
+    log.info("=== AZ Quiz Hub daily run started ===")
     db  = get_db()
     cur = db.cursor()
 
@@ -165,14 +165,14 @@ def run(forced_quiz_id: int | None = None, existing_job_id: int | None = None):
         log.error(f"Job failed: {exc}\n{tb}")
         try:
             detail = f"{exc}\n\n{tb}"
-            update_job(cur, job_id, status="failed", error_message=detail[:1000])
+            update_job(cur, job_id, status="failed", error_message=detail[:4000])
             db.commit()
         except Exception:
             pass
     finally:
         cur.close()
         db.close()
-        log.info("=== QuizFlix daily run finished ===\n")
+        log.info("=== AZ Quiz Hub daily run finished ===\n")
 
 
 def _cleanup(quiz_id: int, video_path: str):

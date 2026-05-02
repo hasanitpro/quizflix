@@ -1,5 +1,5 @@
 """
-generate_video.py  —  QuizFlix video generator
+generate_video.py  —  AZ Quiz Hub video generator
 
 Usage:
     python generate_video.py --quiz-id 1
@@ -292,7 +292,9 @@ def make_timer_clip(
         img = build_timer_frame(question, options, bg_frame, remaining, duration)
         return np.array(img)
 
-    return VideoClip(make_frame, duration=duration).set_fps(config.VIDEO_FPS)
+    clip = VideoClip(make_frame, duration=duration)
+    clip.size = (config.VIDEO_WIDTH, config.VIDEO_HEIGHT)
+    return clip.set_fps(config.VIDEO_FPS)
 
 
 def mix_audio(
@@ -386,11 +388,10 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
 
     def get_bg_clip(duration):
         if use_video_bg:
-            n, fps = _n_bg_frames, _loop_fps
-            def make_frame(t):
-                return _bg_frames[int(t * fps) % n]
-            from moviepy.video.VideoClip import VideoClip
-            return VideoClip(make_frame, duration=duration).set_fps(config.VIDEO_FPS)
+            from moviepy.editor import ImageSequenceClip
+            n = max(1, math.ceil(duration * _loop_fps))
+            seq = [_bg_frames[i % _n_bg_frames] for i in range(n)]
+            return ImageSequenceClip(seq, fps=_loop_fps)
         return ImageClip(bg_frame).set_duration(duration)
 
     # 3. Generate TTS files
@@ -484,7 +485,7 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
     final = concatenate_videoclips(segments, method="compose")
     # temp_audiofile given an explicit path so moviepy never uses a
     # NamedTemporaryFile (which Windows locks and ffmpeg can't open).
-    temp_audio = os.path.join(config.OUTPUT_DIR, f"quiz_{quiz_id}_{date_str}_snd.aac")
+    temp_audio = os.path.join(config.OUTPUT_DIR, f"quiz_{quiz_id}_{date_str}_snd.m4a")
     final.write_videofile(
         output_path,
         fps=config.VIDEO_FPS,
@@ -535,7 +536,7 @@ def _make_thumbnail(title: str, bg_frame: np.ndarray, out_path: str):
 # ---------------------------------------------------------------------------
 
 if __name__ == "__main__":
-    parser = argparse.ArgumentParser(description="Generate a quiz video from QuizFlix")
+    parser = argparse.ArgumentParser(description="Generate a quiz video from AZ Quiz Hub")
     parser.add_argument("--quiz-id", type=int, required=True, help="Quiz ID from the database")
     parser.add_argument("--output", type=str, default=None, help="Output MP4 file path")
     args = parser.parse_args()

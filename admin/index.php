@@ -25,7 +25,7 @@ $jobsStmt = $pdo->query("
 $videoJobs = $jobsStmt->fetchAll(PDO::FETCH_ASSOC);
 ?>
 
-<h1>📊 Quizflix Admin Dashboard</h1>
+<h1>📊 AZ Quiz Hub Admin Dashboard</h1>
 
 <?php if (isset($_SESSION['message'])): ?>
 <div id="flash-message" style="

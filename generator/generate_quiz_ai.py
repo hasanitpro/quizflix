@@ -48,7 +48,7 @@ def _get_client() -> genai.Client:
 # Prompt & generation
 # ---------------------------------------------------------------------------
 
-PROMPT_TEMPLATE = """Generate a fun and educational multiple-choice quiz about "{topic}" for a YouTube channel called QuizFlix.
+PROMPT_TEMPLATE = """Generate a fun and educational multiple-choice quiz about "{topic}" for a YouTube channel called AZ Quiz Hub.
 
 Return ONLY valid JSON matching this exact schema — no markdown, no extra text:
 {{
@@ -76,7 +76,7 @@ Content rules:
 
 Writing rules for each field:
 - title: plain text, max 60 chars, no emoji.
-- intro_text: natural spoken English for TTS. Open with a direct question or surprising fact about "{topic}". Welcome the viewer to QuizFlix. Tell them there are {count} questions with 10 seconds each. Build excitement with an energetic, friendly tone.
+- intro_text: natural spoken English for TTS. Open with a direct question or surprising fact about "{topic}". Welcome the viewer to AZ Quiz Hub. Tell them there are {count} questions with 10 seconds each. Build excitement with an energetic, friendly tone.
 - outro_text: natural spoken English for TTS. Congratulate the viewer warmly. Ask them to drop their score in the comments. Tell them to like the video and subscribe for a brand new quiz every single day.
 - youtube_title: 60-80 chars, 1-2 relevant emojis placed naturally (not at the start), strong SEO keywords for "{topic}", end with a hook phrase such as "Can You Score 10/10?" or "How Many Can YOU Get Right?" or "Only Geniuses Score 100%!".
 - youtube_description: 400-600 words. Structure: (1) First line — compelling hook visible before "show more" (must contain "{topic}" and a challenge hook). (2) Paragraph about what the quiz covers and why "{topic}" is fascinating. (3) What viewers will learn or discover. (4) Engagement section: ask viewers to pause and answer each question, then comment their score. (5) Subscribe CTA. (6) A blank line then 12-15 relevant hashtags. Use emoji bullets (🎯 🧠 💡 📚 🌍 etc.) for visual structure. No markdown asterisks.

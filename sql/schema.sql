@@ -1,4 +1,4 @@
--- QuizFlix Database Schema
+-- AZ Quiz Hub Database Schema
 -- Run this against a fresh MySQL database named `quizflix`
 
 CREATE DATABASE IF NOT EXISTS quizflix CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;

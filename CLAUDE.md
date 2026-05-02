@@ -1,8 +1,8 @@
-# QuizFlix — CLAUDE.md
+# AZ Quiz Hub — CLAUDE.md
 
 ## What this project is
 
-QuizFlix is an automated YouTube quiz video channel. Every day it:
+AZ Quiz Hub is an automated YouTube quiz video channel. Every day it:
 1. Calls **Gemini 2.5 Flash** to generate a fresh 10-question multiple-choice quiz on a random topic
 2. Renders a **1080p MP4 video** of the quiz (backgrounds, animated timer, TTS narration, sound effects)
 3. **Uploads the video to YouTube** via the Data API v3

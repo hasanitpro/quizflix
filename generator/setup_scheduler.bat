@@ -1,5 +1,5 @@
 @echo off
-:: QuizFlix — Register Windows Task Scheduler job
+:: AZ Quiz Hub — Register Windows Task Scheduler job
 :: Edit the /st time below (HH:MM in 24-hour format) before running.
 :: Run this script as Administrator.
 
