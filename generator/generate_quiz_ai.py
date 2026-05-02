@@ -126,17 +126,16 @@ def _validate(data: dict):
 # ---------------------------------------------------------------------------
 
 def _pick_media_assets() -> dict:
-    all_files   = os.listdir(config.MEDIA_DIR) if os.path.exists(config.MEDIA_DIR) else []
-    audio_files = [f for f in all_files if f.lower().endswith(".mp3")]
-    bg_files    = [f for f in all_files if f.lower().split(".")[-1] in ("jpg","jpeg","png","webp","gif","mp4")]
+    media = config.MEDIA_DIR
 
-    def pick(pool, default):
-        return random.choice(pool) if pool else default
+    def resolve(filename):
+        """Return filename if the file exists in MEDIA_DIR, otherwise None."""
+        return filename if os.path.exists(os.path.join(media, filename)) else None
 
     return {
-        "bg_music":         pick(audio_files, "bg-music.mp3"),
-        "correct_sound":    pick(audio_files, "correct.mp3"),
-        "background_image": pick(bg_files,    "chalkboard-bg.jpg"),
+        "bg_music":         resolve(config.DEFAULT_BG_MUSIC)      or config.DEFAULT_BG_MUSIC,
+        "correct_sound":    resolve(config.DEFAULT_CORRECT_SOUND) or config.DEFAULT_CORRECT_SOUND,
+        "background_image": resolve(config.DEFAULT_BACKGROUND)    or config.DEFAULT_BACKGROUND,
     }
 
 

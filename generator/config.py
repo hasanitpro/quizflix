@@ -20,6 +20,11 @@ AUDIO_TMP_DIR = os.path.join(BASE_DIR, "audio_tmp")
 MEDIA_DIR     = r"D:\xampp\htdocs\quizflix\public\media"
 LOGO_PATH     = r"D:\xampp\htdocs\quizflix\public\assets\logo.png"
 
+# --- Default media assets (filenames inside MEDIA_DIR) ---
+DEFAULT_BG_MUSIC      = "bg-music.mp3"
+DEFAULT_CORRECT_SOUND = "correct.mp3"
+DEFAULT_BACKGROUND    = "video_bg.mp4"
+
 # --- Video ---
 VIDEO_WIDTH    = 1920
 VIDEO_HEIGHT   = 1080
