@@ -164,7 +164,8 @@ def run(forced_quiz_id: int | None = None, existing_job_id: int | None = None):
         tb = traceback.format_exc()
         log.error(f"Job failed: {exc}\n{tb}")
         try:
-            update_job(cur, job_id, status="failed", error_message=str(exc)[:500])
+            detail = f"{exc}\n\n{tb}"
+            update_job(cur, job_id, status="failed", error_message=detail[:1000])
             db.commit()
         except Exception:
             pass

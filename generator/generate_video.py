@@ -361,21 +361,23 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
 
     if use_video_bg:
         bg_clip_src = VideoFileClip(bg_path).resize((config.VIDEO_WIDTH, config.VIDEO_HEIGHT))
-        bg_frame = bg_clip_src.get_frame(0)
+        bg_frame    = bg_clip_src.get_frame(0)
+        _vid_dur    = bg_clip_src.duration
+        _vid_fps    = bg_clip_src.fps or config.VIDEO_FPS
     else:
         bg_frame = get_background_frame(bg_path)
 
     def get_bg_clip(duration):
         if use_video_bg:
-            if bg_clip_src.duration < duration:
-                loops = math.ceil(duration / bg_clip_src.duration)
-                from moviepy.editor import concatenate_videoclips
-                looped = concatenate_videoclips([bg_clip_src] * loops)
-            else:
-                looped = bg_clip_src
-            return looped.subclip(0, duration).without_audio()
-        else:
-            return ImageClip(bg_frame).set_duration(duration)
+            # Use a custom VideoClip that loops via modulo — avoids passing the
+            # same VideoFileClip object multiple times to concatenate_videoclips,
+            # which causes [Errno 22] Invalid argument on Windows.
+            from moviepy.video.VideoClip import VideoClip
+            return (
+                VideoClip(lambda t: bg_clip_src.get_frame(t % _vid_dur), duration=duration)
+                .set_fps(_vid_fps)
+            )
+        return ImageClip(bg_frame).set_duration(duration)
 
     # 3. Generate TTS files
     print("Generating TTS audio...")

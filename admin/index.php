@@ -144,9 +144,12 @@ $progressCfg = [
                     <div class="progress-label"><?= htmlspecialchars($cfg['label']) ?></div>
                 </div>
                 <?php if ($job['status'] === 'failed' && $job['error_message']): ?>
-                <small style="color:#c0392b;display:block;margin-top:3px;">
-                    <?= htmlspecialchars(substr($job['error_message'], 0, 120)) ?>
-                </small>
+                <details style="margin-top:4px;">
+                    <summary style="color:#c0392b;font-size:0.82rem;cursor:pointer;">
+                        <?= htmlspecialchars(substr($job['error_message'], 0, 80)) ?>…
+                    </summary>
+                    <pre style="font-size:0.78rem;color:#c0392b;white-space:pre-wrap;margin:4px 0 0;"><?= htmlspecialchars($job['error_message']) ?></pre>
+                </details>
                 <?php endif ?>
             </td>
 
@@ -194,7 +197,7 @@ function renderStatus(cell, status, youtubeUrl, errorMsg) {
             <div class="progress-label">${cfg.label}</div>
         </div>`;
     if (status === 'failed' && errorMsg)
-        html += `<small style="color:#c0392b;display:block;margin-top:3px;">${errorMsg.substring(0,120)}</small>`;
+        html += `<details style="margin-top:4px;"><summary style="color:#c0392b;font-size:0.82rem;cursor:pointer;">${errorMsg.substring(0,80)}…</summary><pre style="font-size:0.78rem;color:#c0392b;white-space:pre-wrap;margin:4px 0 0;">${errorMsg}</pre></details>`;
     if (status === 'done' && youtubeUrl)
         html += `<a href="${youtubeUrl}" target="_blank" class="button" style="margin-top:5px;padding:4px 10px;display:inline-block;">▶ Watch</a>`;
     cell.innerHTML = html;
