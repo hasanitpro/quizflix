@@ -198,28 +198,47 @@ label {
     white-space: nowrap;
 }
 
-/* Active-jobs banner */
+/* Active-jobs banner — fixed bottom-right toast */
 .active-jobs-banner {
-    background: #fff8e1;
-    border: 1px solid #ffc107;
-    border-left: 5px solid #ff9800;
-    border-radius: 6px;
+    position: fixed;
+    bottom: 28px;
+    right: 28px;
+    background: #1e1e2e;
+    color: #e8e8f0;
+    border-left: 4px solid #2196F3;
+    border-radius: 10px;
     padding: 14px 18px;
-    margin-bottom: 24px;
     display: flex;
-    align-items: center;
-    gap: 14px;
-    font-size: 0.95rem;
+    align-items: flex-start;
+    gap: 12px;
+    font-size: 0.88rem;
+    max-width: 320px;
+    box-shadow: 0 8px 28px rgba(0,0,0,0.35);
+    z-index: 9999;
+    animation: toastSlideUp 0.25s ease;
+}
+
+.active-jobs-banner .banner-sub {
+    color: #9090aa;
+    font-size: 0.8rem;
+    margin-top: 3px;
+    line-height: 1.4;
+}
+
+@keyframes toastSlideUp {
+    from { transform: translateY(16px); opacity: 0; }
+    to   { transform: translateY(0);    opacity: 1; }
 }
 
 .spinner {
-    width: 22px;
-    height: 22px;
-    border: 3px solid #ffc107;
-    border-top-color: #e65100;
+    width: 20px;
+    height: 20px;
+    border: 2.5px solid rgba(255,255,255,0.15);
+    border-top-color: #2196F3;
     border-radius: 50%;
     animation: spin 0.8s linear infinite;
     flex-shrink: 0;
+    margin-top: 2px;
 }
 
 @keyframes spin {

@@ -495,7 +495,7 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
         audio_bitrate="192k",
         temp_audiofile=temp_audio,
         remove_temp=True,
-        logger="bar",
+        logger=None,
     )
 
     # 6. Generate thumbnail

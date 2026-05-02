@@ -100,15 +100,12 @@ $progressCfg = [
 ];
 ?>
 
-<!-- Active-jobs banner (hidden by default; JS shows it if jobs are running) -->
+<!-- Active-jobs toast (fixed bottom-right; JS shows it when jobs are running) -->
 <div class="active-jobs-banner" id="active-banner" style="display:none;">
     <div class="spinner"></div>
     <div>
-        <strong id="banner-text">Video generation in progress…</strong><br>
-        <span style="color:#666;font-size:0.88rem;">
-            You can safely leave this page — the process runs in the background.
-            This page auto-refreshes every 5 seconds.
-        </span>
+        <strong id="banner-text">Video generation in progress…</strong>
+        <div class="banner-sub">You can safely leave this page — the process runs in the background.</div>
     </div>
 </div>
 
