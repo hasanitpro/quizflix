@@ -16,6 +16,11 @@ from pathlib import Path
 
 import requests
 from PIL import Image, ImageDraw, ImageFilter, ImageFont
+
+# moviepy 1.0.3 still references the removed PIL.Image.ANTIALIAS (dropped in Pillow 10)
+if not hasattr(Image, "ANTIALIAS"):
+    Image.ANTIALIAS = Image.LANCZOS
+
 from moviepy.editor import (
     AudioFileClip,
     CompositeVideoClip,
