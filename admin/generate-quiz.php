@@ -44,7 +44,7 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST') {
         // Run quiz generation synchronously (~5-10 seconds)
         $oldDir = getcwd();
         chdir($genDir);
-        exec("\"{$python}\" \"{$genScript}\" --topic {$topicArg} 2>&1", $output, $exitCode);
+        exec("\"{$python}\" -X utf8 \"{$genScript}\" --topic {$topicArg} 2>&1", $output, $exitCode);
         chdir($oldDir);
 
         if ($exitCode !== 0) {

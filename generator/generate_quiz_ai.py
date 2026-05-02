@@ -14,6 +14,14 @@ import argparse
 import json
 import os
 import random
+import sys
+
+# Windows console defaults to cp1252 which can't encode emoji in AI-generated text
+try:
+    sys.stdout.reconfigure(encoding="utf-8", errors="replace")
+    sys.stderr.reconfigure(encoding="utf-8", errors="replace")
+except AttributeError:
+    pass
 
 from google import genai
 from google.genai import types
