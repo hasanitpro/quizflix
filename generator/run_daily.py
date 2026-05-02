@@ -163,6 +163,8 @@ def run(forced_quiz_id: int | None = None, existing_job_id: int | None = None):
         # Step 3: Mark success
         update_job(cur, job_id,
                    status="done",
+                   progress=100,
+                   progress_label="✅ Uploaded to YouTube",
                    youtube_video_id=yt_id,
                    youtube_url=yt_url,
                    completed_at=datetime.now().strftime("%Y-%m-%d %H:%M:%S"))

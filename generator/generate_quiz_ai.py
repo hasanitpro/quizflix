@@ -83,10 +83,43 @@ Writing rules for each field:
 - youtube_tags: 12-15 tags — mix of broad (quiz, trivia, education, general knowledge) and specific to "{topic}"."""
 
 
-def generate_quiz_content(topic: str) -> dict:
+def _get_existing_questions(topic: str) -> list[str]:
+    """Return all question texts already stored for this topic (dedup guard)."""
+    db  = mysql.connector.connect(
+        host=config.DB_HOST, database=config.DB_NAME,
+        user=config.DB_USER, password=config.DB_PASSWORD,
+    )
+    cur = db.cursor()
+    try:
+        cur.execute("""
+            SELECT q.question_text
+            FROM questions q
+            JOIN quizzes qz ON q.quiz_id = qz.id
+            WHERE qz.topic = %s
+            ORDER BY q.id
+            LIMIT 200
+        """, (topic,))
+        return [row[0] for row in cur.fetchall()]
+    finally:
+        cur.close()
+        db.close()
+
+
+def generate_quiz_content(topic: str, existing_questions: list[str] | None = None) -> dict:
     client = _get_client()
-    prompt = PROMPT_TEMPLATE.format(topic=topic, count=config.QUESTIONS_PER_QUIZ)
+
+    exclusion_block = ""
+    if existing_questions:
+        numbered = "\n".join(f"{i+1}. {q}" for i, q in enumerate(existing_questions))
+        exclusion_block = (
+            f"\n\nIMPORTANT — Do NOT repeat, rephrase, or reuse any of these questions "
+            f"that already exist in previous quizzes on this topic:\n{numbered}\n"
+        )
+
+    prompt = PROMPT_TEMPLATE.format(topic=topic, count=config.QUESTIONS_PER_QUIZ) + exclusion_block
     print(f"Asking Gemini ({config.GEMINI_MODEL}) to generate a quiz about: {topic}")
+    if existing_questions:
+        print(f"  Excluding {len(existing_questions)} existing questions")
 
     response = client.models.generate_content(
         model=config.GEMINI_MODEL,
@@ -225,10 +258,11 @@ def _pick_topic(forced: str | None) -> str:
 
 
 def generate_and_insert_quiz(topic: str | None = None) -> int:
-    topic  = _pick_topic(topic)
-    data   = generate_quiz_content(topic)
-    data["_topic"] = topic   # pass to insert_quiz via data dict
-    assets = _pick_media_assets()
+    topic             = _pick_topic(topic)
+    existing          = _get_existing_questions(topic)
+    data              = generate_quiz_content(topic, existing_questions=existing or None)
+    data["_topic"]    = topic
+    assets            = _pick_media_assets()
     return insert_quiz(data, assets)
 
 

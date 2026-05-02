@@ -335,8 +335,11 @@ def build_question_overlay(
     for line in q_lines:
         bb = f_q.getbbox(line)
         lw = bb[2] - bb[0]
-        draw.text(((W - lw) // 2 + 3, y + 3), line, font=f_q, fill=(0,0,0,160))
-        draw.text(((W - lw) // 2,     y),     line, font=f_q, fill=(255,255,255,255))
+        tx = (W - lw) // 2
+        # Deep shadow + subtle blue-purple glow
+        draw.text((tx+4, y+4), line, font=f_q, fill=(0, 0, 0, 180))
+        draw.text((tx+2, y+2), line, font=f_q, fill=(30, 20, 80, 100))
+        draw.text((tx,   y),   line, font=f_q, fill=(255, 255, 255, 255))
         y += FS_Q + 10
     y += 18
 
@@ -370,10 +373,12 @@ def build_question_overlay(
         bcx = ox + 22 + BADGE_R
         bcy = oy + OPT_H // 2
         draw.ellipse([bcx-BADGE_R, bcy-BADGE_R, bcx+BADGE_R, bcy+BADGE_R],
-                     fill=(255,255,255,50))
+                     fill=(255,255,255,55), outline=(255,255,255,180), width=2)
         bb = f_badge.getbbox(lbl)
-        draw.text((bcx-(bb[2]-bb[0])//2, bcy-(bb[3]-bb[1])//2),
-                  lbl, font=f_badge, fill=(255,255,255,255))
+        bx = bcx-(bb[2]-bb[0])//2
+        by = bcy-(bb[3]-bb[1])//2
+        draw.text((bx+1, by+1), lbl, font=f_badge, fill=(0,0,0,120))
+        draw.text((bx, by),     lbl, font=f_badge, fill=(255,255,255,255))
 
         # Option text
         tx  = bcx + BADGE_R + 14
@@ -420,41 +425,58 @@ def build_title_overlay(title: str, subtitle: str) -> Image.Image:
     """Intro / outro glass card — matches browser .intro-screen / .outro-screen."""
     f_title = load_font(config.FONT_TITLE,   FS_TITLE)
     f_sub   = load_font(config.FONT_OPTIONS, FS_SUB)
+    f_brand = load_font(config.FONT_OPTIONS, FS_META + 4)
 
     pw  = min(PANEL_W + 60, W - 160)
     px  = (W - pw) // 2
-    pad = 60
+    pad = 64
 
-    # Measure height
+    # Measure height  (+brand label + divider)
     t_lines = wrap_text(title,    f_title, pw - pad*2)
     s_lines = wrap_text(subtitle, f_sub,   pw - pad*2) if subtitle else []
-    t_h = len(t_lines) * (FS_TITLE + 12)
-    s_h = len(s_lines) * (FS_SUB   + 10) + 30 if s_lines else 0
-    ph  = pad*2 + t_h + s_h
-    py  = (H - ph) // 2
+    t_h  = len(t_lines) * (FS_TITLE + 12)
+    s_h  = len(s_lines) * (FS_SUB   + 10) + 30 if s_lines else 0
+    ph   = pad*2 + t_h + s_h + 52  # +52 for divider + brand line
+    py   = (H - ph) // 2
 
     img  = Image.new("RGBA", (W, H), (0, 0, 0, 0))
     draw = ImageDraw.Draw(img)
 
-    # Panel outline
+    # Panel outline — brighter than question card
     draw.rounded_rectangle([px, py, px+pw, py+ph], radius=24,
-                             outline=(255,255,255,28), width=1)
+                             outline=(255, 255, 255, 40), width=1)
 
     y = py + pad
+
+    # Title
     for line in t_lines:
         bb = f_title.getbbox(line)
         lw = bb[2] - bb[0]
-        draw.text(((W-lw)//2+3, y+3), line, font=f_title, fill=(0,0,0,180))
-        draw.text(((W-lw)//2,   y),   line, font=f_title, fill=(255,255,255,255))
+        tx = (W - lw) // 2
+        draw.text((tx+4, y+4), line, font=f_title, fill=(0,  0,  0,   190))
+        draw.text((tx+2, y+2), line, font=f_title, fill=(30, 20, 80,  100))
+        draw.text((tx,   y),   line, font=f_title, fill=(255,255,255, 255))
         y += FS_TITLE + 12
 
+    # Cyan divider line
+    div_pad = pw // 4
+    draw.line([(px + div_pad, y + 16), (px + pw - div_pad, y + 16)],
+               fill=(0, 212, 255, 90), width=2)
+    y += 36
+
     if s_lines:
-        y += 22
         for line in s_lines:
             bb = f_sub.getbbox(line)
             lw = bb[2] - bb[0]
-            draw.text(((W-lw)//2, y), line, font=f_sub, fill=(200,220,255,210))
+            draw.text(((W-lw)//2, y), line, font=f_sub, fill=(200, 220, 255, 215))
             y += FS_SUB + 10
+        y += 10
+
+    # "AZ QUIZ HUB" brand
+    brand = "AZ QUIZ HUB"
+    bb    = f_brand.getbbox(brand)
+    draw.text(((W - (bb[2]-bb[0])) // 2, y + 4),
+               brand, font=f_brand, fill=(0, 212, 255, 160))
 
     _paste_logo(img)
     return img, px, py, ph
@@ -502,32 +524,44 @@ def _draw_timer_on(img_arr: np.ndarray, seconds_left: float, total: float,
     cx = W // 2
     cy = centre_y
     r  = TIMER_R
+    inner = r - 10
 
     # Urgency colour
     if seconds_left > 5:
-        arc_col = (0, 212, 255, 230)
+        arc_col = (0, 212, 255, 240)
     elif seconds_left > 2:
-        arc_col = (255, 183, 0, 230)
+        arc_col = (255, 183, 0, 240)
     else:
-        arc_col = (255, 68, 68, 230)
+        arc_col = (255, 68, 68, 240)
+
+    # Outer glow ring (low-opacity, matches browser box-shadow)
+    for g in (4, 3, 2):
+        draw.ellipse([cx-r-g*3, cy-r-g*3, cx+r+g*3, cy+r+g*3],
+                     outline=(*arc_col[:3], 18), width=2)
 
     # BG circle
-    draw.ellipse([cx-r, cy-r, cx+r, cy+r], fill=(0,0,0,170))
-    draw.ellipse([cx-r, cy-r, cx+r, cy+r], outline=(255,255,255,22), width=2)
+    draw.ellipse([cx-r, cy-r, cx+r, cy+r], fill=(0, 0, 0, 185))
+    draw.ellipse([cx-r, cy-r, cx+r, cy+r], outline=(255, 255, 255, 28), width=2)
 
-    # Stroke arc (matches browser stroke-dasharray=283, r=45 → scale to TIMER_R)
+    # Track ring (matches browser .circle.bg  opacity 0.25)
+    draw.ellipse([cx-inner, cy-inner, cx+inner, cy+inner],
+                 outline=(255, 255, 255, 50), width=10)
+
+    # Active arc
     if seconds_left > 0.001:
-        inner = r - 9
         draw.arc([cx-inner, cy-inner, cx+inner, cy+inner],
                   start=-90, end=-90 + 360*(seconds_left/total),
-                  fill=arc_col, width=8)
+                  fill=arc_col, width=10)
 
     # Number
-    f = load_font(config.FONT_TITLE, FS_TIMER)
-    n = str(math.ceil(seconds_left))
+    f  = load_font(config.FONT_TITLE, FS_TIMER)
+    n  = str(math.ceil(seconds_left))
     bb = f.getbbox(n)
-    draw.text((cx-(bb[2]-bb[0])//2, cy-(bb[3]-bb[1])//2),
-               n, font=f, fill=(255,255,255,255))
+    nx = cx - (bb[2]-bb[0]) // 2
+    ny = cy - (bb[3]-bb[1]) // 2
+    # subtle shadow
+    draw.text((nx+2, ny+2), n, font=f, fill=(0, 0, 0, 160))
+    draw.text((nx, ny),     n, font=f, fill=(255, 255, 255, 255))
 
     return np.array(img.convert("RGB"))
 
@@ -790,20 +824,62 @@ def generate_video(quiz_id: int, output_path: str | None = None,
 
 
 def _make_thumbnail(title: str, bg_frame: np.ndarray, out_path: str):
-    img  = Image.fromarray(bg_frame)
-    draw = ImageDraw.Draw(img)
-    font = load_font(config.FONT_TITLE, 110)
-    lines = wrap_text(title, font, W - 200)
-    y = (H - len(lines) * 130) // 2
-    for line in lines:
-        bb = font.getbbox(line)
-        x  = (W - (bb[2]-bb[0])) // 2
-        for dx in range(-4, 5):
-            for dy in range(-4, 5):
-                draw.text((x+dx, y+dy), line, font=font, fill="#000000")
-        draw.text((x, y), line, font=font, fill="#ffffff")
-        y += 130
-    img.save(out_path, "JPEG", quality=92)
+    img  = Image.fromarray(bg_frame).convert("RGBA")
+
+    # Dark gradient vignette over lower 65% of frame
+    vig  = Image.new("RGBA", (W, H), (0, 0, 0, 0))
+    vd   = ImageDraw.Draw(vig)
+    grad_top = int(H * 0.35)
+    for i in range(grad_top, H):
+        frac = (i - grad_top) / (H - grad_top)
+        a    = int(220 * (frac ** 0.6))
+        vd.line([(0, i), (W, i)], fill=(4, 5, 20, a))
+    img.alpha_composite(vig)
+
+    draw      = ImageDraw.Draw(img)
+    font_big  = load_font(config.FONT_TITLE,   92)
+    font_sm   = load_font(config.FONT_OPTIONS, 40)
+    font_tag  = load_font(config.FONT_OPTIONS, 34)
+
+    # ── Title ──
+    title_lines = wrap_text(title, font_big, W - 220)
+    line_h      = 108
+    block_h     = len(title_lines) * line_h + 56  # +56 for brand label
+    y           = H - block_h - 72
+
+    for line in title_lines:
+        bb = font_big.getbbox(line)
+        lw = bb[2] - bb[0]
+        tx = (W - lw) // 2
+        # Stroke shadow
+        for dx, dy in [(-3,0),(3,0),(0,-3),(0,3),(-2,-2),(2,-2),(-2,2),(2,2)]:
+            draw.text((tx+dx, y+dy), line, font=font_big, fill=(0, 0, 0, 255))
+        draw.text((tx, y), line, font=font_big, fill=(255, 255, 255, 255))
+        y += line_h
+
+    # ── AZ Quiz Hub brand line ──
+    brand = "AZ QUIZ HUB"
+    bb    = font_sm.getbbox(brand)
+    bw    = bb[2] - bb[0]
+    draw.text(((W - bw) // 2, y + 10), brand, font=font_sm, fill=(0, 212, 255, 255))
+
+    # ── "TRIVIA QUIZ" pill badge top-right ──
+    badge_text = "TRIVIA QUIZ"
+    bb2  = font_tag.getbbox(badge_text)
+    bw2  = bb2[2] - bb2[0]
+    pad  = 14
+    rx1  = W - bw2 - pad*2 - 24
+    rx2  = W - 24
+    ry1  = 28
+    ry2  = ry1 + 54
+    draw.rounded_rectangle([rx1, ry1, rx2, ry2], radius=10, fill=(0, 212, 255, 230))
+    draw.text((rx1 + pad, ry1 + (54-(bb2[3]-bb2[1]))//2),
+              badge_text, font=font_tag, fill=(0, 0, 0, 255))
+
+    # ── Logo top-left ──
+    _paste_logo(img)
+
+    img.convert("RGB").save(out_path, "JPEG", quality=93)
 
 
 # ---------------------------------------------------------------------------

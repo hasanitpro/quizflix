@@ -126,12 +126,15 @@ $progressCfg = [
     </thead>
     <tbody>
         <?php foreach ($videoJobs as $job):
-            $cfg      = $progressCfg[$job['status']] ?? $progressCfg['pending'];
-            $isActive = in_array($job['status'], $activeStatuses);
-            // Use real DB progress when available, fall back to status default
-            $pct      = ($job['progress'] > 0) ? (int)$job['progress'] : $cfg['pct'];
-            $label    = ($job['progress_label'] !== null && $job['progress_label'] !== '')
-                        ? $job['progress_label'] : $cfg['label'];
+            $cfg        = $progressCfg[$job['status']] ?? $progressCfg['pending'];
+            $isActive   = in_array($job['status'], $activeStatuses);
+            $isTerminal = in_array($job['status'], ['done', 'failed']);
+            // Terminal states always show the status default (stored label may be stale)
+            $pct   = $isTerminal ? $cfg['pct']
+                                 : (($job['progress'] > 0) ? (int)$job['progress'] : $cfg['pct']);
+            $label = $isTerminal ? $cfg['label']
+                                 : (($job['progress_label'] !== null && $job['progress_label'] !== '')
+                                     ? $job['progress_label'] : $cfg['label']);
         ?>
         <tr data-job-id="<?= (int)$job['id'] ?>" data-status="<?= htmlspecialchars($job['status']) ?>">
             <td><?= htmlspecialchars($job['quiz_title']) ?></td>
@@ -193,10 +196,11 @@ function getActiveIds() {
 }
 
 function renderStatus(cell, job) {
-    const cfg  = DEFAULTS[job.status] || DEFAULTS.pending;
-    // Use real DB progress when available, fall back to status default
-    const pct  = (job.progress > 0) ? job.progress : cfg.pct;
-    const lbl  = (job.progress_label) ? job.progress_label : cfg.label;
+    const cfg        = DEFAULTS[job.status] || DEFAULTS.pending;
+    const isTerminal = job.status === 'done' || job.status === 'failed';
+    // Terminal states always use the status default — stored label may be stale
+    const pct      = isTerminal ? cfg.pct : (job.progress > 0 ? job.progress : cfg.pct);
+    const lbl      = isTerminal ? cfg.label : (job.progress_label ? job.progress_label : cfg.label);
     const isActive = ACTIVE.includes(job.status);
 
     let html = `
@@ -212,8 +216,6 @@ function renderStatus(cell, job) {
         </div>`;
     if (job.status === 'failed' && job.error_message)
         html += `<details style="margin-top:4px;"><summary style="color:#c0392b;font-size:0.82rem;cursor:pointer;">${job.error_message.substring(0,80)}…</summary><pre style="font-size:0.78rem;color:#c0392b;white-space:pre-wrap;margin:4px 0 0;">${job.error_message}</pre></details>`;
-    if (job.status === 'done' && job.youtube_url)
-        html += `<a href="${job.youtube_url}" target="_blank" class="button" style="margin-top:5px;padding:4px 10px;display:inline-block;">▶ Watch</a>`;
     cell.innerHTML = html;
 }
 
