@@ -5,16 +5,19 @@ CREATE DATABASE IF NOT EXISTS quizflix CHARACTER SET utf8mb4 COLLATE utf8mb4_uni
 USE quizflix;
 
 CREATE TABLE IF NOT EXISTS quizzes (
-  id               INT PRIMARY KEY AUTO_INCREMENT,
-  title            VARCHAR(255) NOT NULL,
-  intro_text       TEXT,
-  outro_text       TEXT,
-  bg_music         VARCHAR(255),
-  chalk_sound      VARCHAR(255),
-  correct_sound    VARCHAR(255),
-  background_image VARCHAR(255),
-  last_uploaded_at TIMESTAMP NULL DEFAULT NULL,
-  created_at       TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+  id                  INT PRIMARY KEY AUTO_INCREMENT,
+  title               VARCHAR(255) NOT NULL,
+  intro_text          TEXT,
+  outro_text          TEXT,
+  youtube_title       VARCHAR(100) NULL,
+  youtube_description TEXT         NULL,
+  youtube_tags        TEXT         NULL,
+  bg_music            VARCHAR(255),
+  chalk_sound         VARCHAR(255),
+  correct_sound       VARCHAR(255),
+  background_image    VARCHAR(255),
+  last_uploaded_at    TIMESTAMP NULL DEFAULT NULL,
+  created_at          TIMESTAMP DEFAULT CURRENT_TIMESTAMP
 );
 
 CREATE TABLE IF NOT EXISTS questions (

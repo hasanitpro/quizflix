@@ -13,8 +13,10 @@ if (!$quizId) {
 try {
     // Get quiz metadata
     $stmt = $pdo->prepare("
-        SELECT title, intro_text, outro_text, bg_music, chalk_sound, correct_sound, background_image 
-        FROM quizzes 
+        SELECT title, intro_text, outro_text,
+               youtube_title, youtube_description, youtube_tags,
+               bg_music, chalk_sound, correct_sound, background_image
+        FROM quizzes
         WHERE id = ?
     ");
     $stmt->execute([$quizId]);
@@ -54,14 +56,17 @@ try {
 
     // Return full quiz object
     echo json_encode([
-        "title" => $quiz['title'],
-        "introText" => $quiz['intro_text'],
-        "outroText" => $quiz['outro_text'],
-        "bgMusic" => $quiz['bg_music'],
-        "chalkSound" => $quiz['chalk_sound'],
-        "correctSound" => $quiz['correct_sound'],
-        "backgroundImage" => $quiz['background_image'],
-        "questions" => $quizData
+        "title"              => $quiz['title'],
+        "introText"          => $quiz['intro_text'],
+        "outroText"          => $quiz['outro_text'],
+        "youtubeTitle"       => $quiz['youtube_title'],
+        "youtubeDescription" => $quiz['youtube_description'],
+        "youtubeTags"        => $quiz['youtube_tags'] ? json_decode($quiz['youtube_tags'], true) : [],
+        "bgMusic"            => $quiz['bg_music'],
+        "chalkSound"         => $quiz['chalk_sound'],
+        "correctSound"       => $quiz['correct_sound'],
+        "backgroundImage"    => $quiz['background_image'],
+        "questions"          => $quizData
     ], JSON_UNESCAPED_UNICODE | JSON_PRETTY_PRINT);
 
 } catch (PDOException $e) {

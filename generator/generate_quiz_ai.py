@@ -7,7 +7,7 @@ Usage:
 
 Prerequisites:
     Get a free API key at https://aistudio.google.com/app/apikey
-    Then set GEMINI_API_KEY in generator/config.py
+    Then set GEMINI_API_KEY in generator/.env
 """
 
 import argparse
@@ -31,7 +31,7 @@ def _get_client() -> genai.Client:
         raise ValueError(
             "GEMINI_API_KEY is not set.\n"
             "Get a free key at https://aistudio.google.com/app/apikey\n"
-            "Then set it in generator/config.py:  GEMINI_API_KEY = \"AIza...\""
+            "Then add it to generator/.env:  GEMINI_API_KEY=AIza..."
         )
     return genai.Client(api_key=config.GEMINI_API_KEY)
 
@@ -40,31 +40,39 @@ def _get_client() -> genai.Client:
 # Prompt & generation
 # ---------------------------------------------------------------------------
 
-PROMPT_TEMPLATE = """Generate a fun and educational multiple-choice quiz about "{topic}".
+PROMPT_TEMPLATE = """Generate a fun and educational multiple-choice quiz about "{topic}" for a YouTube channel called QuizFlix.
 
 Return ONLY valid JSON matching this exact schema — no markdown, no extra text:
 {{
-  "title": "Short catchy quiz title (max 60 chars)",
-  "intro_text": "2-3 sentences welcoming the viewer and describing what the quiz is about.",
-  "outro_text": "2-3 sentences congratulating the viewer and encouraging them to subscribe.",
+  "title": "Short catchy quiz title (max 60 chars, no emoji)",
+  "intro_text": "Spoken video welcome (2-3 sentences, TTS-friendly).",
+  "outro_text": "Spoken video closing (2-3 sentences, TTS-friendly).",
+  "youtube_title": "SEO-optimised YouTube video title (60-80 chars, 1-2 emojis).",
+  "youtube_description": "Full YouTube video description (400-600 words).",
+  "youtube_tags": ["tag1", "tag2"],
   "questions": [
     {{
-      "question_text": "The full question sentence?",
-      "options": ["Option A text", "Option B text", "Option C text", "Option D text"],
+      "question_text": "Question sentence?",
+      "options": ["Option A", "Option B", "Option C", "Option D"],
       "correct_index": 0,
-      "fun_fact": "1-2 interesting sentences explaining the answer or a related fact."
+      "fun_fact": "Interesting 1-2 sentence fact about the answer."
     }}
   ]
 }}
 
-Rules:
-- Exactly {count} questions.
-- correct_index is 0-based: 0=A, 1=B, 2=C, 3=D.
-- Questions should vary in difficulty (mix of easy, medium, hard).
-- Do NOT repeat similar questions.
-- Keep question_text under 120 characters.
-- Keep each option under 60 characters.
-- fun_fact must be genuinely interesting and educational."""
+Content rules:
+- Exactly {count} questions, varying in difficulty (easy / medium / hard mix).
+- correct_index is 0-based (0 = A, 1 = B, 2 = C, 3 = D). No repeated or similar questions.
+- question_text: under 120 characters. Each option: under 60 characters.
+- fun_fact: genuinely interesting and educational.
+
+Writing rules for each field:
+- title: plain text, max 60 chars, no emoji.
+- intro_text: natural spoken English for TTS. Open with a direct question or surprising fact about "{topic}". Welcome the viewer to QuizFlix. Tell them there are {count} questions with 10 seconds each. Build excitement with an energetic, friendly tone.
+- outro_text: natural spoken English for TTS. Congratulate the viewer warmly. Ask them to drop their score in the comments. Tell them to like the video and subscribe for a brand new quiz every single day.
+- youtube_title: 60-80 chars, 1-2 relevant emojis placed naturally (not at the start), strong SEO keywords for "{topic}", end with a hook phrase such as "Can You Score 10/10?" or "How Many Can YOU Get Right?" or "Only Geniuses Score 100%!".
+- youtube_description: 400-600 words. Structure: (1) First line — compelling hook visible before "show more" (must contain "{topic}" and a challenge hook). (2) Paragraph about what the quiz covers and why "{topic}" is fascinating. (3) What viewers will learn or discover. (4) Engagement section: ask viewers to pause and answer each question, then comment their score. (5) Subscribe CTA. (6) A blank line then 12-15 relevant hashtags. Use emoji bullets (🎯 🧠 💡 📚 🌍 etc.) for visual structure. No markdown asterisks.
+- youtube_tags: 12-15 tags — mix of broad (quiz, trivia, education, general knowledge) and specific to "{topic}"."""
 
 
 def generate_quiz_content(topic: str) -> dict:
@@ -86,19 +94,23 @@ def generate_quiz_content(topic: str) -> dict:
 
 
 def _validate(data: dict):
-    for key in ("title", "intro_text", "outro_text", "questions"):
+    required_top = ("title", "intro_text", "outro_text", "youtube_title",
+                    "youtube_description", "youtube_tags", "questions")
+    for key in required_top:
         if key not in data:
-            raise ValueError(f"LLM response missing key: {key}")
+            raise ValueError(f"Gemini response missing key: '{key}'")
     if len(data["questions"]) < 5:
         raise ValueError(f"Too few questions returned: {len(data['questions'])}")
     for i, q in enumerate(data["questions"]):
         for k in ("question_text", "options", "correct_index", "fun_fact"):
             if k not in q:
-                raise ValueError(f"Question {i} missing key: {k}")
+                raise ValueError(f"Question {i} missing key: '{k}'")
         if len(q["options"]) != 4:
             raise ValueError(f"Question {i} must have exactly 4 options")
         if not (0 <= int(q["correct_index"]) <= 3):
             raise ValueError(f"Question {i} correct_index out of range: {q['correct_index']}")
+    if not isinstance(data["youtube_tags"], list) or len(data["youtube_tags"]) < 3:
+        raise ValueError("youtube_tags must be a list with at least 3 items")
 
 
 # ---------------------------------------------------------------------------
@@ -132,14 +144,25 @@ def insert_quiz(data: dict, assets: dict) -> int:
     )
     cur = db.cursor()
     try:
+        tags_json = json.dumps(data.get("youtube_tags", []))
+
         cur.execute("""
             INSERT INTO quizzes
-              (title, intro_text, outro_text, bg_music, chalk_sound, correct_sound, background_image)
-            VALUES (%s, %s, %s, %s, %s, %s, %s)
+              (title, intro_text, outro_text,
+               youtube_title, youtube_description, youtube_tags,
+               bg_music, chalk_sound, correct_sound, background_image)
+            VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s)
         """, (
-            data["title"], data["intro_text"], data["outro_text"],
-            assets["bg_music"], assets["chalk_sound"],
-            assets["correct_sound"], assets["background_image"],
+            data["title"],
+            data["intro_text"],
+            data["outro_text"],
+            data["youtube_title"],
+            data["youtube_description"],
+            tags_json,
+            assets["bg_music"],
+            assets["chalk_sound"],
+            assets["correct_sound"],
+            assets["background_image"],
         ))
         quiz_id = cur.lastrowid
 
@@ -157,6 +180,7 @@ def insert_quiz(data: dict, assets: dict) -> int:
 
         db.commit()
         print(f"Quiz inserted: ID={quiz_id}, title='{data['title']}'")
+        print(f"YouTube title: {data['youtube_title']}")
         return quiz_id
     except Exception:
         db.rollback()

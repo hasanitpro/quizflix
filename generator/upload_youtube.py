@@ -118,24 +118,26 @@ def upload_video(
 
 
 def upload_quiz_video(quiz_id: int, video_path: str, quiz_data: dict) -> dict:
-    date_str    = datetime.now().strftime("%B %d, %Y")
-    title       = f"{quiz_data.get('title', 'Quiz')} Challenge | {date_str}"
-    intro       = quiz_data.get("introText", "").strip()
-    outro       = quiz_data.get("outroText", "").strip()
+    date_code  = datetime.now().strftime("%Y%m%d")
+    thumb_path = os.path.join(config.THUMB_DIR, f"quiz_{quiz_id}_{date_code}.jpg")
+
+    # Use AI-generated YouTube metadata; fall back to a basic title if missing
+    title = (
+        quiz_data.get("youtubeTitle") or
+        f"{quiz_data.get('title', 'Quiz')} | Can You Score 10/10? 🧠"
+    )
     description = (
-        f"{intro}\n\n"
-        f"{outro}\n\n"
+        quiz_data.get("youtubeDescription") or
+        f"{quiz_data.get('introText', '').strip()}\n\n"
+        f"{quiz_data.get('outroText', '').strip()}\n\n"
         "👍 Like and subscribe for daily quiz videos!\n\n"
         "#quiz #trivia #dailyquiz #challenge #education"
-    ).strip()
-    tags = [
-        "quiz", "trivia", "daily quiz", "challenge", "education",
-        "general knowledge", "brain teaser", quiz_data.get("title", "quiz"),
-    ]
-
-    from datetime import datetime as dt
-    date_code   = dt.now().strftime("%Y%m%d")
-    thumb_path  = os.path.join(config.THUMB_DIR, f"quiz_{quiz_id}_{date_code}.jpg")
+    )
+    tags = (
+        quiz_data.get("youtubeTags") or
+        ["quiz", "trivia", "daily quiz", "challenge", "education",
+         "general knowledge", quiz_data.get("title", "quiz")]
+    )
 
     return upload_video(video_path, title, description, tags, thumb_path)
 
