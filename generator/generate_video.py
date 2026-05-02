@@ -355,28 +355,42 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
     bg_music_path = media(bg_music)
     correct_path  = media(correct_snd)
 
-    # 2. Get background image frame (static image; videos handled separately)
+    # 2. Load background — for video files, pre-extract frames into RAM then
+    #    close the reader immediately.  This avoids the Windows [Errno 22] that
+    #    occurs when a VideoFileClip reader and the write_videofile encoder run
+    #    as concurrent ffmpeg subprocesses sharing the same file descriptor.
     bg_ext = Path(bg_file).suffix.lower() if bg_file else ""
     use_video_bg = bg_ext in (".mp4",) and bg_path and os.path.exists(bg_path)
 
     if use_video_bg:
-        bg_clip_src = VideoFileClip(bg_path).resize((config.VIDEO_WIDTH, config.VIDEO_HEIGHT))
-        bg_frame    = bg_clip_src.get_frame(0)
-        _vid_dur    = bg_clip_src.duration
-        _vid_fps    = bg_clip_src.fps or config.VIDEO_FPS
+        _raw       = VideoFileClip(bg_path)
+        _src_fps   = _raw.fps or 25.0
+        # Extract at ≤15 fps, covering ≤2 s of the clip → ≤30 frames (~185 MB)
+        _loop_fps  = min(_src_fps, 15.0)
+        _loop_dur  = min(_raw.duration, 2.0)
+        _interval  = 1.0 / _loop_fps
+        W, H       = config.VIDEO_WIDTH, config.VIDEO_HEIGHT
+        _bg_frames = []
+        t = 0.0
+        while t < _loop_dur:
+            frame = _raw.get_frame(t)
+            resized = Image.fromarray(frame).resize((W, H), Image.LANCZOS)
+            _bg_frames.append(np.array(resized))
+            t += _interval
+        _raw.close()
+        bg_frame     = _bg_frames[0]
+        _n_bg_frames = len(_bg_frames)
+        print(f"Video background: extracted {_n_bg_frames} frames at {_loop_fps:.0f} fps")
     else:
         bg_frame = get_background_frame(bg_path)
 
     def get_bg_clip(duration):
         if use_video_bg:
-            # Use a custom VideoClip that loops via modulo — avoids passing the
-            # same VideoFileClip object multiple times to concatenate_videoclips,
-            # which causes [Errno 22] Invalid argument on Windows.
+            n, fps = _n_bg_frames, _loop_fps
+            def make_frame(t):
+                return _bg_frames[int(t * fps) % n]
             from moviepy.video.VideoClip import VideoClip
-            return (
-                VideoClip(lambda t: bg_clip_src.get_frame(t % _vid_dur), duration=duration)
-                .set_fps(_vid_fps)
-            )
+            return VideoClip(make_frame, duration=duration).set_fps(config.VIDEO_FPS)
         return ImageClip(bg_frame).set_duration(duration)
 
     # 3. Generate TTS files
@@ -468,6 +482,9 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
     # 5. Concatenate & export
     print("Concatenating and exporting video (this may take a while)...")
     final = concatenate_videoclips(segments, method="compose")
+    # temp_audiofile given an explicit path so moviepy never uses a
+    # NamedTemporaryFile (which Windows locks and ffmpeg can't open).
+    temp_audio = os.path.join(config.OUTPUT_DIR, f"quiz_{quiz_id}_{date_str}_snd.aac")
     final.write_videofile(
         output_path,
         fps=config.VIDEO_FPS,
@@ -475,7 +492,8 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
         audio_codec="aac",
         bitrate="5000k",
         audio_bitrate="192k",
-        threads=4,
+        temp_audiofile=temp_audio,
+        remove_temp=True,
         logger="bar",
     )
 
@@ -486,8 +504,6 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
     print(f"Video saved: {output_path}")
     print(f"Thumbnail:   {thumb_path}")
 
-    if use_video_bg:
-        bg_clip_src.close()
     final.close()
 
     return output_path
