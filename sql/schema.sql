@@ -41,6 +41,8 @@ CREATE TABLE IF NOT EXISTS video_jobs (
   id               INT PRIMARY KEY AUTO_INCREMENT,
   quiz_id          INT NOT NULL,
   status           ENUM('pending','generating','uploading','done','failed') DEFAULT 'pending',
+  progress         TINYINT UNSIGNED NOT NULL DEFAULT 0,
+  progress_label   VARCHAR(200) NULL,
   video_path       VARCHAR(500),
   youtube_url      VARCHAR(500),
   youtube_video_id VARCHAR(50),

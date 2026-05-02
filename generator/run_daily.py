@@ -82,6 +82,20 @@ def update_job(cursor, job_id: int, **fields):
     cursor.execute(f"UPDATE video_jobs SET {cols} WHERE id = %s", values)
 
 
+def _make_progress_cb(cursor, db, job_id: int):
+    """Returns a callback that persists progress % + label to the DB."""
+    def cb(pct: int, label: str):
+        try:
+            cursor.execute(
+                "UPDATE video_jobs SET progress = %s, progress_label = %s WHERE id = %s",
+                (pct, label, job_id),
+            )
+            db.commit()
+        except Exception:
+            pass
+    return cb
+
+
 # ---------------------------------------------------------------------------
 # Main
 # ---------------------------------------------------------------------------
@@ -127,14 +141,16 @@ def run(forced_quiz_id: int | None = None, existing_job_id: int | None = None):
         log.info(f"Quiz: {quiz_data.get('title')}")
 
         # Step 1: Generate video
-        update_job(cur, job_id, status="generating")
+        update_job(cur, job_id, status="generating", progress=1, progress_label="Starting…")
         db.commit()
 
         log.info("Generating video...")
-        video_path = generate_video(quiz_id)
+        progress_cb = _make_progress_cb(cur, db, job_id)
+        video_path  = generate_video(quiz_id, progress_cb=progress_cb)
         log.info(f"Video generated: {video_path}")
 
-        update_job(cur, job_id, video_path=video_path, status="uploading")
+        update_job(cur, job_id, video_path=video_path, status="uploading",
+                   progress=99, progress_label="Uploading to YouTube…")
         db.commit()
 
         # Step 2: Upload to YouTube

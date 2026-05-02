@@ -9,7 +9,8 @@ if (empty($ids)) { echo '[]'; exit; }
 
 $ph   = implode(',', array_fill(0, count($ids), '?'));
 $stmt = $pdo->prepare("
-    SELECT id, status, youtube_url, error_message, created_at, completed_at
+    SELECT id, status, progress, progress_label, youtube_url,
+           error_message, created_at, completed_at
     FROM video_jobs WHERE id IN ($ph)
 ");
 $stmt->execute($ids);

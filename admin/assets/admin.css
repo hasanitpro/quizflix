@@ -195,7 +195,18 @@ label {
 .progress-label {
     font-size: 0.82rem;
     color: #555;
-    white-space: nowrap;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.progress-pct {
+    margin-left: auto;
+    font-weight: 700;
+    font-size: 0.78rem;
+    color: #2196F3;
+    min-width: 32px;
+    text-align: right;
 }
 
 /* Active-jobs banner — fixed bottom-right toast */

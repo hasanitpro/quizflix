@@ -90,13 +90,13 @@ setTimeout(() => {
 $activeStatuses = ['pending', 'generating', 'uploading'];
 $activeJobs     = array_filter($videoJobs, fn($j) => in_array($j['status'], $activeStatuses));
 
-// Progress config per status
+// Progress config per status (pct is the fallback when DB progress=0)
 $progressCfg = [
-    'pending'    => ['pct' =>  8, 'label' => 'Queued — waiting to start',    'color' => '#9e9e9e', 'pulse' => false],
-    'generating' => ['pct' => 45, 'label' => 'Generating video (~8 min)…',   'color' => '#2196F3', 'pulse' => true],
-    'uploading'  => ['pct' => 82, 'label' => 'Uploading to YouTube…',         'color' => '#ff9800', 'pulse' => true],
-    'done'       => ['pct' => 100,'label' => '✅ Done',                        'color' => '#4CAF50', 'pulse' => false],
-    'failed'     => ['pct' => 100,'label' => '❌ Failed',                      'color' => '#f44336', 'pulse' => false],
+    'pending'    => ['pct' =>  2, 'label' => 'Queued — waiting to start',  'color' => '#9e9e9e', 'pulse' => false],
+    'generating' => ['pct' =>  5, 'label' => 'Starting…',                  'color' => '#2196F3', 'pulse' => true],
+    'uploading'  => ['pct' => 99, 'label' => 'Uploading to YouTube…',      'color' => '#ff9800', 'pulse' => true],
+    'done'       => ['pct' => 100,'label' => '✅ Done',                     'color' => '#4CAF50', 'pulse' => false],
+    'failed'     => ['pct' => 100,'label' => '❌ Failed',                   'color' => '#f44336', 'pulse' => false],
 ];
 ?>
 
@@ -126,8 +126,12 @@ $progressCfg = [
     </thead>
     <tbody>
         <?php foreach ($videoJobs as $job):
-            $cfg     = $progressCfg[$job['status']] ?? $progressCfg['pending'];
+            $cfg      = $progressCfg[$job['status']] ?? $progressCfg['pending'];
             $isActive = in_array($job['status'], $activeStatuses);
+            // Use real DB progress when available, fall back to status default
+            $pct      = ($job['progress'] > 0) ? (int)$job['progress'] : $cfg['pct'];
+            $label    = ($job['progress_label'] !== null && $job['progress_label'] !== '')
+                        ? $job['progress_label'] : $cfg['label'];
         ?>
         <tr data-job-id="<?= (int)$job['id'] ?>" data-status="<?= htmlspecialchars($job['status']) ?>">
             <td><?= htmlspecialchars($job['quiz_title']) ?></td>
@@ -136,9 +140,14 @@ $progressCfg = [
                 <div class="progress-wrap">
                     <div class="progress-track">
                         <div class="progress-fill <?= $cfg['pulse'] ? 'pulsing' : '' ?>"
-                             style="width:<?= $cfg['pct'] ?>%;background:<?= $cfg['color'] ?>"></div>
+                             style="width:<?= $pct ?>%;background:<?= $cfg['color'] ?>"></div>
                     </div>
-                    <div class="progress-label"><?= htmlspecialchars($cfg['label']) ?></div>
+                    <div class="progress-label">
+                        <?= htmlspecialchars($label) ?>
+                        <?php if ($isActive && $pct > 0): ?>
+                        <span class="progress-pct"><?= $pct ?>%</span>
+                        <?php endif ?>
+                    </div>
                 </div>
                 <?php if ($job['status'] === 'failed' && $job['error_message']): ?>
                 <details style="margin-top:4px;">
@@ -169,12 +178,12 @@ $progressCfg = [
 
 <script>
 const ACTIVE   = ['pending', 'generating', 'uploading'];
-const PROGRESS = {
-    pending:    { pct:  8, label: 'Queued — waiting to start',   color: '#9e9e9e', pulse: false },
-    generating: { pct: 45, label: 'Generating video (~8 min)…',  color: '#2196F3', pulse: true  },
-    uploading:  { pct: 82, label: 'Uploading to YouTube…',        color: '#ff9800', pulse: true  },
-    done:       { pct: 100,label: '✅ Done',                       color: '#4CAF50', pulse: false },
-    failed:     { pct: 100,label: '❌ Failed',                     color: '#f44336', pulse: false },
+const DEFAULTS = {
+    pending:    { pct:  2, label: 'Queued — waiting to start', color: '#9e9e9e', pulse: false },
+    generating: { pct:  5, label: 'Starting…',                 color: '#2196F3', pulse: true  },
+    uploading:  { pct: 99, label: 'Uploading to YouTube…',     color: '#ff9800', pulse: true  },
+    done:       { pct: 100,label: '✅ Done',                    color: '#4CAF50', pulse: false },
+    failed:     { pct: 100,label: '❌ Failed',                  color: '#f44336', pulse: false },
 };
 
 function getActiveIds() {
@@ -183,20 +192,28 @@ function getActiveIds() {
         .map(r => r.dataset.jobId);
 }
 
-function renderStatus(cell, status, youtubeUrl, errorMsg) {
-    const cfg = PROGRESS[status] || PROGRESS.pending;
+function renderStatus(cell, job) {
+    const cfg  = DEFAULTS[job.status] || DEFAULTS.pending;
+    // Use real DB progress when available, fall back to status default
+    const pct  = (job.progress > 0) ? job.progress : cfg.pct;
+    const lbl  = (job.progress_label) ? job.progress_label : cfg.label;
+    const isActive = ACTIVE.includes(job.status);
+
     let html = `
         <div class="progress-wrap">
             <div class="progress-track">
                 <div class="progress-fill ${cfg.pulse ? 'pulsing' : ''}"
-                     style="width:${cfg.pct}%;background:${cfg.color}"></div>
+                     style="width:${pct}%;background:${cfg.color}"></div>
             </div>
-            <div class="progress-label">${cfg.label}</div>
+            <div class="progress-label">
+                ${lbl}
+                ${isActive && pct > 0 ? `<span class="progress-pct">${pct}%</span>` : ''}
+            </div>
         </div>`;
-    if (status === 'failed' && errorMsg)
-        html += `<details style="margin-top:4px;"><summary style="color:#c0392b;font-size:0.82rem;cursor:pointer;">${errorMsg.substring(0,80)}…</summary><pre style="font-size:0.78rem;color:#c0392b;white-space:pre-wrap;margin:4px 0 0;">${errorMsg}</pre></details>`;
-    if (status === 'done' && youtubeUrl)
-        html += `<a href="${youtubeUrl}" target="_blank" class="button" style="margin-top:5px;padding:4px 10px;display:inline-block;">▶ Watch</a>`;
+    if (job.status === 'failed' && job.error_message)
+        html += `<details style="margin-top:4px;"><summary style="color:#c0392b;font-size:0.82rem;cursor:pointer;">${job.error_message.substring(0,80)}…</summary><pre style="font-size:0.78rem;color:#c0392b;white-space:pre-wrap;margin:4px 0 0;">${job.error_message}</pre></details>`;
+    if (job.status === 'done' && job.youtube_url)
+        html += `<a href="${job.youtube_url}" target="_blank" class="button" style="margin-top:5px;padding:4px 10px;display:inline-block;">▶ Watch</a>`;
     cell.innerHTML = html;
 }
 
@@ -222,13 +239,10 @@ async function pollJobs() {
         const res  = await fetch(`job-status.php?ids=${ids.join(',')}`);
         const jobs = await res.json();
         for (const job of jobs) {
-            const row  = document.querySelector(`tr[data-job-id="${job.id}"]`);
+            const row = document.querySelector(`tr[data-job-id="${job.id}"]`);
             if (!row) continue;
             row.dataset.status = job.status;
-            renderStatus(
-                row.querySelector('.job-status-cell'),
-                job.status, job.youtube_url, job.error_message
-            );
+            renderStatus(row.querySelector('.job-status-cell'), job);
             // Reload the Watch link in the YouTube column too
             const ytCell = row.cells[2];
             if (job.status === 'done' && job.youtube_url) {

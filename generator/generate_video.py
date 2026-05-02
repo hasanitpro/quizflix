@@ -420,6 +420,48 @@ def make_timer_clip(
     return ImageSequenceClip(frames, fps=TIMER_FPS)
 
 
+# ---------------------------------------------------------------------------
+# Progress logger — replaces moviepy's tqdm bar, safe in subprocesses
+# ---------------------------------------------------------------------------
+
+class _ProgressLogger:
+    """
+    Minimal proglog-compatible logger that calls a progress callback
+    instead of writing to stdout.  Avoids the OSError [Errno 22] that
+    tqdm triggers when sys.stdout is a Windows pipe (PHP subprocess).
+    """
+
+    def __init__(self, progress_cb, start_pct: int, end_pct: int, total_frames: int):
+        self._cb     = progress_cb
+        self._start  = start_pct
+        self._end    = end_pct
+        self._total  = max(1, total_frames)
+        self._frame  = 0
+        # Report every N frames so DB isn't hammered (≈ 1 update/sec at 24fps)
+        self._stride = max(1, self._total // 60)
+
+    def __call__(self, **changes):
+        if 't' not in changes or not self._cb:
+            return
+        self._frame += 1
+        if self._frame % self._stride == 0 or self._frame >= self._total:
+            frac = min(1.0, self._frame / self._total)
+            pct  = int(self._start + frac * (self._end - self._start))
+            self._cb(pct, f"Encoding video… {self._frame} / {self._total} frames")
+
+    def iter_bar(self, **kw):
+        bar_name = next(iter(kw))
+        for item in kw[bar_name]:
+            yield item
+            self(**{bar_name: item})
+
+    # Satisfy any attribute lookups moviepy/proglog might make
+    def warning(self, *a, **kw): pass
+    def info(self, *a, **kw):    pass
+    def debug(self, *a, **kw):   pass
+    def error(self, *a, **kw):   pass
+
+
 def mix_audio(
     bg_music_path: str | None,
     tts_path: str | None,
@@ -453,12 +495,27 @@ def mix_audio(
 # Main generator
 # ---------------------------------------------------------------------------
 
-def generate_video(quiz_id: int, output_path: str | None = None) -> str:
+def generate_video(quiz_id: int, output_path: str | None = None,
+                   progress_cb=None) -> str:
+    """
+    Generate the quiz video.
+
+    progress_cb(pct: int, label: str) is called at each milestone so callers
+    can persist real-time progress (e.g. to the video_jobs DB row).
+    """
+    def _rep(pct: int, label: str):
+        if progress_cb:
+            try:
+                progress_cb(pct, label)
+            except Exception:
+                pass
+
     date_str = datetime.now().strftime("%Y%m%d")
     if output_path is None:
         output_path = os.path.join(config.OUTPUT_DIR, f"quiz_{quiz_id}_{date_str}.mp4")
 
     # 1. Fetch quiz data
+    _rep(2, "Fetching quiz data…")
     resp = requests.get(f"{config.QUIZ_API_BASE}/api/get-quiz.php",
                         params={"id": quiz_id}, timeout=10)
     resp.raise_for_status()
@@ -479,6 +536,8 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
     bg_path       = media(bg_file)
     bg_music_path = media(bg_music)
     correct_path  = media(correct_snd)
+
+    _rep(3, "Loading background…")
 
     # 2. Load background — for video files pre-extract all loop frames into RAM
     #    then close the reader before write_videofile starts to avoid concurrent
@@ -512,25 +571,43 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
 
     # 3. Generate TTS files
     print("Generating TTS audio…")
-    tts_prefix  = os.path.join(config.AUDIO_TMP_DIR, f"q{quiz_id}_{date_str}")
-    intro_tts   = f"{tts_prefix}_intro.mp3"
-    outro_tts   = f"{tts_prefix}_outro.mp3"
-    q_tts_paths = []
-    f_tts_paths = []
+    tts_prefix   = os.path.join(config.AUDIO_TMP_DIR, f"q{quiz_id}_{date_str}")
+    intro_tts    = f"{tts_prefix}_intro.mp3"
+    outro_tts    = f"{tts_prefix}_outro.mp3"
+    q_tts_paths  = []
+    f_tts_paths  = []
 
-    generate_tts(intro_text or title, intro_tts)
-    generate_tts(outro_text or "Thanks for playing!", outro_tts)
+    # TTS occupies 5 → 22 % of the progress bar
+    total_tts    = 2 + total_q * 2   # intro + outro + 2 per question
+    tts_done     = 0
+
+    def _tts_rep():
+        nonlocal tts_done
+        tts_done += 1
+        _rep(5 + int(tts_done / total_tts * 17), f"Generating speech… ({tts_done}/{total_tts})")
+
+    generate_tts(intro_text or title, intro_tts);  _tts_rep()
+    generate_tts(outro_text or "Thanks for playing!", outro_tts);  _tts_rep()
 
     for i, q in enumerate(questions):
         qp = f"{tts_prefix}_q{i}.mp3"
         fp = f"{tts_prefix}_f{i}.mp3"
-        generate_tts(q["q"], qp)
-        generate_tts(q.get("f", ""), fp)
+        generate_tts(q["q"], qp);           _tts_rep()
+        generate_tts(q.get("f", ""), fp);   _tts_rep()
         q_tts_paths.append(qp)
         f_tts_paths.append(fp)
 
     # 4. Build video segments
+    # Segment building occupies 23 → 62 % of the progress bar.
     print("Building video segments…")
+    total_segs = 1 + total_q * 3 + 1   # intro + (A+B+C)×Q + outro
+    seg_done   = 0
+
+    def _seg_rep(label: str):
+        nonlocal seg_done
+        seg_done += 1
+        _rep(23 + int(seg_done / total_segs * 39), label)
+
     segments = []
 
     # --- Intro ---
@@ -541,6 +618,7 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
     if intro_audio:
         intro_clip = intro_clip.set_audio(intro_audio)
     segments.append(intro_clip)
+    _seg_rep("Building intro…")
 
     # --- Questions ---
     for i, q in enumerate(questions):
@@ -551,7 +629,7 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
         fun_fact = q.get("f", "")
         q_num    = i + 1
 
-        # Phase A: question read-aloud (TTS narration)
+        # Phase A: question read-aloud
         a_overlay = build_question_overlay(q_text, options, q_num, total_q)
         a_dur     = tts_duration(q_tts_paths[i]) + 0.5
         a_clip    = make_static_clip(bg_frames, a_overlay, _loop_fps, a_dur)
@@ -559,17 +637,17 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
         if a_audio:
             a_clip = a_clip.set_audio(a_audio)
         segments.append(a_clip)
+        _seg_rep(f"Building question {q_num}/{total_q}…")
 
-        # Phase B: timer countdown
-        # Build base frame (bg composited with question overlay) once, then
-        # add only the animated arc per TIMER_FPS frame — ~20× fewer PIL draws.
-        b_dur       = float(config.TIMER_DURATION)
-        b_base_arr  = composite_bg_overlay(bg_frames[0], a_overlay)
-        b_timer     = make_timer_clip(b_base_arr, b_dur)
-        b_audio     = mix_audio(bg_music_path, None, None, b_dur)
+        # Phase B: timer countdown — pre-render base once, arc at TIMER_FPS
+        b_dur      = float(config.TIMER_DURATION)
+        b_base_arr = composite_bg_overlay(bg_frames[0], a_overlay)
+        b_timer    = make_timer_clip(b_base_arr, b_dur)
+        b_audio    = mix_audio(bg_music_path, None, None, b_dur)
         if b_audio:
             b_timer = b_timer.set_audio(b_audio)
         segments.append(b_timer)
+        _seg_rep(f"Building timer {q_num}/{total_q}…")
 
         # Phase C: answer reveal + fun fact
         c_overlay = build_question_overlay(q_text, options, q_num, total_q,
@@ -580,6 +658,7 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
         if c_audio:
             c_clip = c_clip.set_audio(c_audio)
         segments.append(c_clip)
+        _seg_rep(f"Building reveal {q_num}/{total_q}…")
 
     # --- Outro ---
     outro_dur     = max(tts_duration(outro_tts) + 0.5, 5.0)
@@ -589,10 +668,18 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
     if outro_audio:
         outro_clip = outro_clip.set_audio(outro_audio)
     segments.append(outro_clip)
+    _seg_rep("Building outro…")
 
     # 5. Concatenate & export
+    _rep(63, "Concatenating clips…")
     print("Concatenating and exporting video…")
-    final      = concatenate_videoclips(segments, method="compose")
+    final        = concatenate_videoclips(segments, method="compose")
+    total_frames = max(1, int(final.duration * OUTPUT_FPS))
+    _rep(65, f"Encoding video… 0 / {total_frames} frames")
+
+    encode_logger = _ProgressLogger(progress_cb, 65, 95, total_frames) \
+                    if progress_cb else None
+
     temp_audio = os.path.join(config.OUTPUT_DIR, f"quiz_{quiz_id}_{date_str}_snd.m4a")
     final.write_videofile(
         output_path,
@@ -603,13 +690,15 @@ def generate_video(quiz_id: int, output_path: str | None = None) -> str:
         audio_bitrate="192k",
         temp_audiofile=temp_audio,
         remove_temp=True,
-        logger=None,
+        logger=encode_logger,
     )
 
     # 6. Generate thumbnail
+    _rep(96, "Generating thumbnail…")
     thumb_path = os.path.join(config.THUMB_DIR, f"quiz_{quiz_id}_{date_str}.jpg")
     _make_thumbnail(title, bg_frame, thumb_path)
 
+    _rep(98, "Video ready — starting upload…")
     print(f"Video saved:  {output_path}")
     print(f"Thumbnail:    {thumb_path}")
 
