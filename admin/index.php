@@ -49,6 +49,7 @@ setTimeout(() => {
 <?php unset($_SESSION['message']); endif; ?>
 
 <p>
+    <a href="generate-quiz.php" class="button" style="background:#9c27b0;">🤖 Generate AI Quiz</a>
     <a href="upload-csv.php" class="button">➕ Upload New Quiz (CSV)</a>
     <a href="create-quiz.php" class="button">➕ Add New Quiz Manually</a>
 </p>
